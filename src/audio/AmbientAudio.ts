@@ -21,6 +21,18 @@ export class AmbientAudio {
   private acidFilter: BiquadFilterNode | null = null;
   private acidGain: GainNode | null = null;
 
+  private hookOscA: OscillatorNode | null = null;
+  private hookOscB: OscillatorNode | null = null;
+  private hookFilter: BiquadFilterNode | null = null;
+  private hookPanner: StereoPannerNode | null = null;
+  private hookEnvGain: GainNode | null = null;
+  private hookMixGain: GainNode | null = null;
+  private hookDelay: DelayNode | null = null;
+  private hookDelayFeedback: GainNode | null = null;
+  private hookDelayWet: GainNode | null = null;
+  private hookLfoOsc: OscillatorNode | null = null;
+  private hookLfoGain: GainNode | null = null;
+
   private baseGain = 0.4;
   private isGenerated = false;
 
@@ -30,16 +42,31 @@ export class AmbientAudio {
   private energyTarget = 0.25;
   private nextStepTime = 0;
   private stepIndex = 0;
+  private nextHookStepTime = 0;
+  private hookStepIndex = 0;
   private lastDriveCurveAmount = 0;
 
   async start() {
     if (this.ctx) {
-      await this.ctx.resume();
+      // Mobile browsers (notably iOS Safari) often require resume() to be invoked
+      // directly from a user gesture; we call it immediately and also await it.
+      void this.ctx.resume();
+      try {
+        await this.ctx.resume();
+      } catch {
+        // ignore
+      }
       return;
     }
 
-    const ctx = new AudioContext();
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ??
+      (typeof AudioContext !== "undefined" ? AudioContext : null);
+    if (!AudioContextCtor) throw new Error("WebAudio AudioContext is not supported in this browser.");
+    const ctx = new AudioContextCtor();
     this.ctx = ctx;
+    unlockAudioContext(ctx);
 
     const masterGain = ctx.createGain();
     this.masterGain = masterGain;
@@ -141,12 +168,91 @@ export class AmbientAudio {
       acidGain.connect(drive);
     }
 
-    await ctx.resume();
+    // Melodic hook (only for generated): detuned lead + tempo delay.
+    if (this.isGenerated) {
+      const hookOscA = ctx.createOscillator();
+      this.hookOscA = hookOscA;
+      hookOscA.type = "sawtooth";
+      hookOscA.frequency.value = 220;
+      hookOscA.detune.value = -6;
+
+      const hookOscB = ctx.createOscillator();
+      this.hookOscB = hookOscB;
+      hookOscB.type = "triangle";
+      hookOscB.frequency.value = 220;
+      hookOscB.detune.value = 6;
+
+      const hookFilter = ctx.createBiquadFilter();
+      this.hookFilter = hookFilter;
+      hookFilter.type = "lowpass";
+      hookFilter.frequency.value = 2200;
+      hookFilter.Q.value = 0.9;
+
+      const hookPanner = ctx.createStereoPanner();
+      this.hookPanner = hookPanner;
+      hookPanner.pan.value = 0;
+
+      const hookEnvGain = ctx.createGain();
+      this.hookEnvGain = hookEnvGain;
+      hookEnvGain.gain.value = 0.0001;
+
+      const hookMixGain = ctx.createGain();
+      this.hookMixGain = hookMixGain;
+      hookMixGain.gain.value = 0;
+
+      const hookDelay = ctx.createDelay(0.8);
+      this.hookDelay = hookDelay;
+      const hookDelayFeedback = ctx.createGain();
+      this.hookDelayFeedback = hookDelayFeedback;
+      const hookDelayWet = ctx.createGain();
+      this.hookDelayWet = hookDelayWet;
+      hookDelayWet.gain.value = 0;
+      hookDelayFeedback.gain.value = 0.26;
+
+      // Slow autopan for a little width (kept subtle).
+      const hookLfoOsc = ctx.createOscillator();
+      this.hookLfoOsc = hookLfoOsc;
+      hookLfoOsc.type = "sine";
+      hookLfoOsc.frequency.value = 0.085;
+      const hookLfoGain = ctx.createGain();
+      this.hookLfoGain = hookLfoGain;
+      hookLfoGain.gain.value = 0.28;
+      hookLfoOsc.connect(hookLfoGain);
+      hookLfoGain.connect(hookPanner.pan);
+
+      hookOscA.connect(hookFilter);
+      hookOscB.connect(hookFilter);
+      hookFilter.connect(hookPanner);
+      hookPanner.connect(hookEnvGain);
+      hookEnvGain.connect(hookMixGain);
+
+      // Route hook *after* the distortion for clarity (still goes through the master filter/comp).
+      // This keeps the track dark but makes the melody read above the kick/rumble.
+      hookMixGain.connect(filter);
+      hookMixGain.connect(hookDelay);
+      hookDelay.connect(hookDelayFeedback);
+      hookDelayFeedback.connect(hookDelay);
+      hookDelay.connect(hookDelayWet);
+      hookDelayWet.connect(filter);
+    }
+
+    // Resume again after async loading in case the context got suspended.
+    void ctx.resume();
+    try {
+      await ctx.resume();
+    } catch {
+      // ignore
+    }
     src.start();
     this.acidOsc?.start();
+    this.hookOscA?.start();
+    this.hookOscB?.start();
+    this.hookLfoOsc?.start();
 
     this.nextStepTime = ctx.currentTime + 0.05;
     this.stepIndex = 0;
+    this.nextHookStepTime = ctx.currentTime + 0.05;
+    this.hookStepIndex = 0;
     this.energy = 0;
     this.setPhase(this.phase);
   }
@@ -165,6 +271,8 @@ export class AmbientAudio {
     if (phase === "play") {
       this.nextStepTime = ctx.currentTime + 0.05;
       this.stepIndex = 0;
+      this.nextHookStepTime = ctx.currentTime + 0.05;
+      this.hookStepIndex = 0;
     }
 
     // Targets tuned for a hard/fast warehouse feel.
@@ -234,6 +342,7 @@ export class AmbientAudio {
     }
 
     this.scheduleAcid(now, e);
+    this.scheduleHook(now, e);
   }
 
   dispose() {
@@ -244,6 +353,21 @@ export class AmbientAudio {
     }
     try {
       this.acidOsc?.stop();
+    } catch {
+      // ignore
+    }
+    try {
+      this.hookOscA?.stop();
+    } catch {
+      // ignore
+    }
+    try {
+      this.hookOscB?.stop();
+    } catch {
+      // ignore
+    }
+    try {
+      this.hookLfoOsc?.stop();
     } catch {
       // ignore
     }
@@ -258,6 +382,14 @@ export class AmbientAudio {
     this.drive?.disconnect();
     this.acidFilter?.disconnect();
     this.acidGain?.disconnect();
+    this.hookDelayWet?.disconnect();
+    this.hookDelayFeedback?.disconnect();
+    this.hookDelay?.disconnect();
+    this.hookMixGain?.disconnect();
+    this.hookEnvGain?.disconnect();
+    this.hookPanner?.disconnect();
+    this.hookFilter?.disconnect();
+    this.hookLfoGain?.disconnect();
     this.masterGain?.disconnect();
     void this.ctx?.close();
     this.source = null;
@@ -272,6 +404,17 @@ export class AmbientAudio {
     this.acidOsc = null;
     this.acidFilter = null;
     this.acidGain = null;
+    this.hookOscA = null;
+    this.hookOscB = null;
+    this.hookFilter = null;
+    this.hookPanner = null;
+    this.hookEnvGain = null;
+    this.hookMixGain = null;
+    this.hookDelay = null;
+    this.hookDelayFeedback = null;
+    this.hookDelayWet = null;
+    this.hookLfoOsc = null;
+    this.hookLfoGain = null;
     this.masterGain = null;
     this.ctx = null;
   }
@@ -489,6 +632,65 @@ export class AmbientAudio {
       this.nextStepTime += step;
     }
   }
+
+  private scheduleHook(now: number, energy: number) {
+    if (!this.ctx) return;
+    if (!this.isGenerated) return;
+    if (!this.hookOscA || !this.hookOscB || !this.hookFilter || !this.hookEnvGain || !this.hookMixGain) return;
+    if (!this.hookDelay || !this.hookDelayWet || !this.hookDelayFeedback) return;
+    if (this.phase !== "play") {
+      // Keep it out of intros/outros to avoid fighting the scene.
+      this.hookMixGain.gain.setTargetAtTime(0, now, 0.12);
+      this.hookDelayWet.gain.setTargetAtTime(0, now, 0.2);
+      return;
+    }
+
+    const bpm = 155;
+    const step8 = 60 / bpm / 2; // 8ths
+    const lookahead = 0.16;
+
+    // Mix level follows energy so the hook “arrives” with the drop.
+    const mix = lerp(0.05, 0.18, Math.pow(energy, 1.1)) * (this.thrusting ? 1.12 : 1);
+    this.hookMixGain.gain.setTargetAtTime(mix, now, 0.08);
+
+    // Tempo-synced dotted 8th-ish delay.
+    this.hookDelay.delayTime.setTargetAtTime(step8 * 1.5, now, 0.12);
+    const wet = lerp(0.04, 0.22, Math.pow(energy, 0.9));
+    this.hookDelayWet.gain.setTargetAtTime(wet, now, 0.12);
+    this.hookDelayFeedback.gain.setTargetAtTime(lerp(0.2, 0.34, energy), now, 0.16);
+
+    while (this.nextHookStepTime < now + lookahead) {
+      const idx = this.hookStepIndex % hookPatternSemitones.length;
+      const semi = hookPatternSemitones[idx];
+      if (semi != null) {
+        const t0 = this.nextHookStepTime;
+        const baseHz = 220; // A3
+        const freq = baseHz * Math.pow(2, semi / 12);
+
+        // Note: small glide for a more "hooky" feel.
+        this.hookOscA.frequency.setTargetAtTime(freq, t0, 0.006);
+        this.hookOscB.frequency.setTargetAtTime(freq, t0, 0.006);
+
+        // Filter "pluck" (kept gentle; distortion + master filter do the rest).
+        const cutBase = lerp(850, 2100, energy) + (this.thrusting ? 250 : 0);
+        const cutPeak = lerp(2600, 5600, energy) + (this.thrusting ? 550 : 0);
+        this.hookFilter.frequency.cancelScheduledValues(t0);
+        this.hookFilter.frequency.setValueAtTime(cutBase, t0);
+        this.hookFilter.frequency.setTargetAtTime(cutPeak, t0 + 0.008, 0.035);
+        this.hookFilter.Q.setTargetAtTime(lerp(0.85, 1.4, energy), t0, 0.08);
+
+        // Per-note amp envelope.
+        const amp = lerp(0.03, 0.11, energy) * (this.thrusting ? 1.15 : 1);
+        this.hookEnvGain.gain.cancelScheduledValues(t0);
+        this.hookEnvGain.gain.setValueAtTime(0.0001, t0);
+        this.hookEnvGain.gain.linearRampToValueAtTime(amp, t0 + 0.008);
+        this.hookEnvGain.gain.exponentialRampToValueAtTime(0.0001, t0 + step8 * 0.98);
+      }
+
+      this.hookStepIndex++;
+      this.nextHookStepTime += step8;
+    }
+  }
 }
 
 function mod(x: number, m: number) {
@@ -503,6 +705,14 @@ const acidPatternSemitones: Array<number | null> = [
   null, null, 0, null, 12, null, null, null, 3, null, null, null, 5, null, null, null,
   0, null, null, null, 12, null, 3, null, null, null, 5, null, 0, null, -2, null,
   null, null, null, null, 12, null, null, null, 3, null, null, null, 5, null, null, null
+];
+
+const hookPatternSemitones: Array<number | null> = [
+  // 2 bars @ 8ths (relative to A3=220Hz).
+  // Darker “phrygian-ish” motif to cut through the groove without turning it bright/cheesy.
+  // Scale tones around A: 0, 1, 3, 5, 7, 8, 10
+  12, 13, 15, 13, 12, 10, 8, 10,
+  null, 12, 13, 15, 17, 15, 13, 12
 ];
 
 function lerp(a: number, b: number, t: number) {
@@ -522,4 +732,30 @@ function makeDriveCurve(amount: number) {
     curve[i] = Math.tanh(x * k);
   }
   return curve;
+}
+
+function unlockAudioContext(ctx: AudioContext) {
+  // iOS Safari can keep WebAudio silent unless we "prime" it from a user gesture.
+  // This is cheap and safe on other browsers.
+  try {
+    void ctx.resume();
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(ctx.destination);
+    const src = ctx.createBufferSource();
+    src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+    src.connect(gain);
+    src.start();
+    src.stop(ctx.currentTime + 0.02);
+    src.onended = () => {
+      try {
+        src.disconnect();
+        gain.disconnect();
+      } catch {
+        // ignore
+      }
+    };
+  } catch {
+    // ignore
+  }
 }

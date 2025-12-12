@@ -64,7 +64,9 @@ export function createMysticGlobeWorld(opts: {
 
   const planetRadius = 4.1;
   // Slightly lower to frame the scene “higher” (more sky above the globe).
-  const planetCenter = new Vector3(0, -2.95, 0);
+  // Framing tweak: raise the globe so the horizon is more visible (not top-down view).
+  // Camera stays at its position, globe comes up to meet the horizon line.
+  const planetCenter = new Vector3(0, -5.5, 4);
   const orbitCenter = planetCenter.clone();
 
   // Invite settles above the planet.
@@ -180,41 +182,71 @@ export function createMysticGlobeWorld(opts: {
   const houseDepth = 0.52;
   const houseRoofHeight = 0.36;
 
+  // NOTE: we distribute points with a *minimum separation* so houses don’t stack/overlap.
+  // We also apply yaw around the instance’s *local up* (after aligning to the surface normal)
+  // to avoid the “randomly tilted sticks/leaves” bug.
+  const treeNormals = generateSeparatedSurfaceNormals({
+    count: treeCount,
+    minAngleRad: 0.12,
+    maxAttempts: 22000
+  });
+  const houseNormals = generateSeparatedSurfaceNormals({
+    count: houseCount,
+    minAngleRad: 0.58,
+    maxAttempts: 22000
+  });
+
   for (let i = 0; i < treeCount; i++) {
-    const p = randomPointOnPlanet(planetRadius, 0.05);
-    n.copy(p).normalize();
+    n.copy(treeNormals[i]);
     const s = 0.65 + Math.random() * 0.55;
 
     // Oriented outward from the planet.
-    const trunkBottomClearance = 0.02;
-    const trunkCenterOffset = trunkBottomClearance + (treeTrunkHeight * s) / 2;
-    const tierOverlap = 0.02 * s;
-    const tierBaseStep = treeTierHeight * s * 0.55;
-    const trunkTopOffset = trunkBottomClearance + treeTrunkHeight * s;
+    const trunkScale = s;
+    const tier1Scale = s * 1.05;
+    const tier2Scale = s * 0.9;
+    const tier3Scale = s * 0.78;
+
+    const trunkHeightS = treeTrunkHeight * trunkScale;
+    const tier1HeightS = treeTierHeight * tier1Scale;
+    const tier2HeightS = treeTierHeight * tier2Scale;
+    const tier3HeightS = treeTierHeight * tier3Scale;
+
+    // Slightly sink into the planet so bases don't appear to "float".
+    const trunkBottomOffset = -0.09 * s;
+    const trunkCenterOffset = trunkBottomOffset + trunkHeightS / 2;
+    const trunkTopOffset = trunkBottomOffset + trunkHeightS;
+
+    const tierOverlap = 0.012 * s;
+    const tierStack = 0.72;
     const tier1Base = trunkTopOffset - tierOverlap;
-    const tier2Base = tier1Base + tierBaseStep;
-    const tier3Base = tier2Base + tierBaseStep;
-    const tier1CenterOffset = tier1Base + (treeTierHeight * s) / 2;
-    const tier2CenterOffset = tier2Base + (treeTierHeight * s) / 2;
-    const tier3CenterOffset = tier3Base + (treeTierHeight * s) / 2;
+    const tier2Base = tier1Base + tier1HeightS * tierStack;
+    const tier3Base = tier2Base + tier2HeightS * tierStack;
+
+    const tier1CenterOffset = tier1Base + tier1HeightS / 2;
+    const tier2CenterOffset = tier2Base + tier2HeightS / 2;
+    const tier3CenterOffset = tier3Base + tier3HeightS / 2;
 
     dummy.position.copy(n).multiplyScalar(planetRadius + trunkCenterOffset);
     dummy.quaternion.setFromUnitVectors(up, n);
-    // Add a random twist around the normal for variety.
-    dummy.rotateOnAxis(n, Math.random() * Math.PI * 2);
-    dummy.scale.setScalar(s);
+    // Add a random twist around the LOCAL up axis (not world normal) for variety.
+    // After setFromUnitVectors, the local Y axis is aligned with the surface normal.
+    dummy.rotateY(Math.random() * Math.PI * 2);
+    dummy.scale.setScalar(trunkScale);
     dummy.updateMatrix();
     trees.trunkInst.setMatrixAt(i, dummy.matrix);
 
     dummy.position.copy(n).multiplyScalar(planetRadius + tier1CenterOffset);
+    dummy.scale.setScalar(tier1Scale);
     dummy.updateMatrix();
     trees.tier1Inst.setMatrixAt(i, dummy.matrix);
 
     dummy.position.copy(n).multiplyScalar(planetRadius + tier2CenterOffset);
+    dummy.scale.setScalar(tier2Scale);
     dummy.updateMatrix();
     trees.tier2Inst.setMatrixAt(i, dummy.matrix);
 
     dummy.position.copy(n).multiplyScalar(planetRadius + tier3CenterOffset);
+    dummy.scale.setScalar(tier3Scale);
     dummy.updateMatrix();
     trees.tier3Inst.setMatrixAt(i, dummy.matrix);
   }
@@ -224,31 +256,39 @@ export function createMysticGlobeWorld(opts: {
   trees.tier3Inst.instanceMatrix.needsUpdate = true;
 
   for (let i = 0; i < houseCount; i++) {
-    const p = randomPointOnPlanet(planetRadius, 0.03);
-    n.copy(p).normalize();
+    // Use separated normals so houses don't overlap
+    n.copy(houseNormals[i]);
     const s = 0.75 + Math.random() * 0.75;
 
-    const baseBottomClearance = 0.02;
-    const baseCenterOffset = baseBottomClearance + (houseBaseHeight * s) / 2;
-    const roofOverlap = 0.015 * s;
-    const roofCenterOffset = baseBottomClearance + houseBaseHeight * s + (houseRoofHeight * s) / 2 - roofOverlap;
-    const windowUpOffset = baseBottomClearance + houseBaseHeight * s * 0.55;
+    // Slightly sink into the planet so bases don't appear to "float".
+    const baseBottomOffset = -0.12 * s;
+    const baseCenterOffset = baseBottomOffset + (houseBaseHeight * s) / 2;
+    const roofOverlap = 0.012 * s;
+    const roofCenterOffset = baseBottomOffset + houseBaseHeight * s + (houseRoofHeight * s) / 2 - roofOverlap;
+    const windowUpOffset = baseBottomOffset + houseBaseHeight * s * 0.55;
     const windowOutOffset = (houseDepth * s) / 2 + 0.01 * s;
 
     dummy.position.copy(n).multiplyScalar(planetRadius + baseCenterOffset);
     dummy.quaternion.setFromUnitVectors(up, n);
-    // Quantize yaw so the roof doesn't look randomly "twisted".
-    dummy.rotateOnAxis(n, Math.floor(Math.random() * 4) * (Math.PI / 2));
+    // Rotate around local Y axis (aligned with surface normal after setFromUnitVectors)
+    const houseYaw = Math.floor(Math.random() * 4) * (Math.PI / 2);
+    dummy.rotateY(houseYaw);
     dummy.scale.setScalar(s);
     dummy.updateMatrix();
     houses.baseInst.setMatrixAt(i, dummy.matrix);
 
+    const baseQuat = dummy.quaternion.clone();
+
     dummy.position.copy(n).multiplyScalar(planetRadius + roofCenterOffset);
+    // Rotate the 4-sided roof so its corners align with the box corners.
+    dummy.quaternion.copy(baseQuat);
+    dummy.rotateY(Math.PI / 4);
     dummy.updateMatrix();
     houses.roofInst.setMatrixAt(i, dummy.matrix);
 
-    // Window faces “out” a bit: offset along the local forward axis.
-    tangentYaw.set(0, 0, 1).applyQuaternion(dummy.quaternion);
+    // Window faces "out" a bit: offset along the local forward axis.
+    dummy.quaternion.copy(baseQuat);
+    tangentYaw.set(0, 0, 1).applyQuaternion(baseQuat);
     dummy.position
       .copy(n)
       .multiplyScalar(planetRadius + windowUpOffset)
@@ -441,7 +481,6 @@ export function createMysticGlobeWorld(opts: {
   // Keep the player visually "above" the globe: sit further out from the planet.
   const playerZ = planetRadius + 1.6;
 
-  let velY = 0;
   const baseY = 1.25;
   // Keep the plane from dipping fully down into the globe framing.
   const playerYMin = baseY - 0.55;
@@ -449,10 +488,21 @@ export function createMysticGlobeWorld(opts: {
   const playerYMax = baseY + 5.1;
   const softCeilingY = baseY + 3.85;
 
-  let flapKick = 0;
+  // Airplane-style "lift": taps add lift, lift decays back to cruise.
+  let lift = 0;
+  let liftDecayHold = 0;
+  let enginePulse = 0;
 
-  // Current y position.
+  // Current y position (smoothed toward a target for less "flappy" motion).
   let y = baseY;
+  let yVel = 0;
+  let targetAltitude = baseY;
+
+  // Smooth pitch for realistic nose-first rotation.
+  let smoothPitch = 0;
+
+  // Visual framing: drop the planet a bit during gameplay so the plane sits more in "air".
+  let planetPlayDrop = 0;
 
   function setQualityLevel(level: number) {
     qualityLevel = clamp(level, 0.25, 1);
@@ -471,10 +521,14 @@ export function createMysticGlobeWorld(opts: {
     state = "playing";
     playElapsed = 0;
     gameOverElapsed = 0;
-    flapKick = 0;
     escapeElapsed = 0;
     escapeCharge = 0;
     didEscape = false;
+    lift = 0;
+    liftDecayHold = 0;
+    enginePulse = 0;
+    targetAltitude = baseY;
+    planetPlayDrop = 0;
     inviteGroup.visible = false;
     inviteGroup.position.copy(posterTarget);
     inviteGroup.rotation.set(0, 0, 0);
@@ -488,18 +542,25 @@ export function createMysticGlobeWorld(opts: {
   }
 
   function recenter() {
-    velY = 0;
     y = baseY;
+    yVel = 0;
+    lift = 0;
+    liftDecayHold = 0;
+    enginePulse = 0;
+    targetAltitude = baseY;
+    planetPlayDrop = 0;
     escapeCharge = 0;
+    smoothPitch = 0;
     syncPlayerPose(0);
   }
 
   function flap() {
     if (state !== "playing") return;
-    velY = Math.max(velY, 0);
-    // Click/tap impulse (mobile-first). Smaller kick => more taps needed to reach escape.
-    velY = clamp(velY + 2.45, -8.0, 8.0);
-    flapKick = 1;
+    // Taps add lift (progress) and a short engine pulse.
+    // Tuned so you need several taps to climb high enough.
+    lift = clamp(lift + 0.22, 0, 1);
+    liftDecayHold = 0.35;
+    enginePulse = 1;
   }
 
   function triggerGameOver() {
@@ -523,11 +584,12 @@ export function createMysticGlobeWorld(opts: {
     escapeWobble = (Math.random() * 2 - 1) * 0.9;
     escapeEnd
       .copy(escapeStart)
-      .add(new Vector3(8.6, 4.6, -7.2))
+      .add(new Vector3(7.2, 3.1, -5.8))
       .add(new Vector3((Math.random() - 0.5) * 1.4, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2));
+    targetAltitude = baseY + Math.max(0, playerYMax - baseY - 0.25);
   }
 
-  function syncPlayerPose(_dt: number) {
+  function syncPlayerPose(dt: number) {
     // 2D-ish: fixed depth; only vertical motion.
     playerPos.set(playerX, y, playerZ);
     player.position.copy(playerPos);
@@ -535,17 +597,39 @@ export function createMysticGlobeWorld(opts: {
     // Player model points along +X, so yaw=0 faces screen-right.
     player.rotation.set(0, 0, 0);
 
-    // Tilt like flappy bird (up = tilt up, down = tilt down).
-    player.rotation.z = MathUtils.clamp(-velY * 0.18, -0.65, 0.55) - flapKick * 0.22;
-    const flex = Math.sin(perfT * 10.5) * 0.06 + flapKick * 0.18;
-    wingLeft.rotation.x = 0.08 + flex;
-    wingRight.rotation.x = -0.08 - flex;
+    // Realistic airplane pitch: nose tilts up first when climbing.
+    // Positive rotation.z = nose up, negative = nose down.
+    const climbIndicator = clamp(yVel * 0.6 + (targetAltitude - y) * 1.8, -3.5, 3.5);
+    const targetPitch = MathUtils.clamp(climbIndicator * 0.12, -0.32, 0.45);
+
+    // Smooth pitch that leads the motion (pitch up responds faster than pitch down).
+    const followRate = targetPitch > smoothPitch ? 9.0 : 5.0;
+    const follow = dt > 0 ? 1 - Math.exp(-dt * followRate) : 1;
+    smoothPitch = lerp(smoothPitch, targetPitch, follow);
+
+    player.rotation.z = smoothPitch;
+
+    // Keep wings stable (no flapping), with a tiny "engine vibration".
+    const vib = (0.006 + 0.01 * enginePulse) * Math.sin(perfT * 18.0);
+    wingLeft.rotation.x = 0.08 + vib;
+    wingRight.rotation.x = -0.08 - vib;
   }
 
   let perfT = 0;
 
   function update(dt: number, t: number) {
     perfT = t;
+
+    // Shift the globe down during play/escape (plane stays where it is).
+    const dropTarget = state === "playing" || state === "escape" ? 0.42 : 0;
+    const dropFollow = 1 - Math.exp(-dt * 3.2);
+    planetPlayDrop = lerp(planetPlayDrop, dropTarget, dropFollow);
+    planetGroup.position.y = planetCenter.y - planetPlayDrop;
+    cloudPivot.position.y = orbitCenter.y - planetPlayDrop;
+    snow.points.position.y = orbitCenter.y + 0.85 - planetPlayDrop;
+    key.target.position.set(planetCenter.x, planetCenter.y - planetPlayDrop + 1.2, planetCenter.z);
+    warmFill.position.set(planetCenter.x, planetCenter.y - planetPlayDrop + 4.2, planetCenter.z + 4.0);
+
     // Planet rotation (main motion).
     // Reference feel: roll the world around Z (like a wheel), while the bird moves up/down.
     const targetRotSpeed = state === "gameover" ? 0.25 : state === "escape" ? 0.2 : 0.38;
@@ -559,36 +643,44 @@ export function createMysticGlobeWorld(opts: {
     if (state === "playing") {
       playElapsed += dt;
 
-      // Click/tap-driven motion: gravity + discrete flap impulses.
-      const gravity = -6.8;
+      // Lift decays back to 0 (cruise) unless you keep tapping.
+      if (liftDecayHold > 0) liftDecayHold = Math.max(0, liftDecayHold - dt);
+      const decay = liftDecayHold > 0 ? 0.08 : 0.24;
+      lift = Math.max(0, lift - decay * dt);
+      enginePulse = Math.max(0, enginePulse - dt * 3.0);
 
-      velY = clamp(velY + gravity * dt, -8.0, 8.0);
-      velY *= Math.pow(0.985, dt * 60);
+      // Smoothly follow a target altitude derived from lift.
+      // This avoids the "flappy bird" feel while still requiring repeated taps.
+      const altitudeRange = Math.max(0, playerYMax - baseY - 0.32);
+      const targetY = baseY + clamp(lift * altitudeRange, 0, altitudeRange);
+      targetAltitude = targetY;
+      const stiffness = 16;
+      const damping = 8.5;
+      yVel += (targetY - y) * stiffness * dt;
+      yVel *= Math.exp(-damping * dt);
+      y += yVel * dt;
 
-      y = y + velY * dt;
       if (y <= playerYMin) {
         y = playerYMin;
-        velY = Math.max(0, velY);
+        yVel = Math.max(0, yVel);
       }
       if (y >= softCeilingY) {
         const ceilingT = clamp((y - softCeilingY) / Math.max(1e-6, playerYMax - softCeilingY), 0, 1);
-        velY += (-8.5 * ceilingT) * dt;
+        yVel += (-7.2 * ceilingT) * dt;
       }
       if (y >= playerYMax) {
         y = playerYMax;
-        velY = Math.min(0, velY);
+        yVel = Math.min(0, yVel);
       }
-
-      flapKick = Math.max(0, flapKick - dt * 6.5);
 
       // If you climb high enough, fly away and reveal the invite.
-      const escapeY = baseY + 4.35;
-      if (y >= escapeY) {
+      const escapeLift = 0.92;
+      if (lift >= escapeLift) {
         escapeCharge += dt;
       } else {
-        escapeCharge = Math.max(0, escapeCharge - dt * 3.6);
+        escapeCharge = Math.max(0, escapeCharge - dt * 2.6);
       }
-      if (escapeCharge >= 0.65) triggerEscape();
+      if (escapeCharge >= 0.85) triggerEscape();
 
       // Fail-safe: auto-finish into invite after a while.
       if (playElapsed >= 90) triggerGameOver();
@@ -598,26 +690,51 @@ export function createMysticGlobeWorld(opts: {
 
     if (state === "escape") {
       escapeElapsed += dt;
-      const escapeDuration = 1.05;
+      // Slower, more graceful escape animation
+      const escapeDuration = 3.2;
       const u = clamp(escapeElapsed / escapeDuration, 0, 1);
-      const eased = 1 - Math.pow(1 - u, 3);
+      
+      // Use a smoother easing curve for more natural flight
+      const eased = u < 0.5 
+        ? 2 * u * u  // Ease in for first half
+        : 1 - Math.pow(-2 * u + 2, 2) / 2;  // Ease out for second half
 
       player.position.lerpVectors(escapeStart, escapeEnd, eased);
-      // Add a small arc + bank so the fly-away feels less "snapped".
+      // Add a gentle, smooth arc for realistic climb path
       const arc = Math.sin(u * Math.PI);
-      player.position.y += arc * 0.75;
-      player.position.z += arc * (-0.55);
+      const arcHeight = arc * 1.2;  // Slightly higher arc
+      player.position.y += arcHeight;
+      player.position.z += arc * (-0.4);  // Gentler depth change
 
+      // Realistic airplane rotation: nose pitches UP during climb (positive Z)
       player.rotation.set(0, 0, 0);
-      player.rotation.x = lerp(escapeStartRotX, 0.28, eased) + arc * 0.05 * escapeWobble;
-      player.rotation.y = lerp(escapeStartRotY, 0.9, eased);
-      player.rotation.z = lerp(escapeStartRotZ, -0.8, eased) + arc * 0.08 * escapeWobble;
+      
+      // Gentle roll tilt (x rotation) - very subtle
+      player.rotation.x = lerp(escapeStartRotX, 0.15, eased) + arc * 0.03 * escapeWobble;
+      
+      // Yaw turn (y rotation) - plane banks slightly as it turns away
+      player.rotation.y = lerp(escapeStartRotY, 0.65, eased);
+      
+      // Pitch (z rotation) - NOSE UP during climb, then gradually levels off
+      // Start from current pitch, climb with nose up, then level out at the end
+      const climbPitch = smoothPitch;  // Use the current smooth pitch as starting point
+      const peakPitch = 0.55;  // Nose up during climb (positive = nose up)
+      const endPitch = 0.25;   // Slightly nose up at the end
+      
+      // Pitch follows a natural climb pattern: increase during ascent, decrease at peak
+      const pitchCurve = u < 0.4 
+        ? lerp(climbPitch, peakPitch, u / 0.4)  // Pitch up during initial climb
+        : lerp(peakPitch, endPitch, (u - 0.4) / 0.6);  // Gradually level off
+      
+      player.rotation.z = pitchCurve + arc * 0.04 * escapeWobble;
 
-      const flex = Math.sin((t + escapeElapsed) * 16.0) * 0.08 + (1 - eased) * 0.14;
+      // Gentle wing movement
+      const flex = Math.sin((t + escapeElapsed) * 12.0) * 0.05 + (1 - eased) * 0.08;
       wingLeft.rotation.x = 0.08 + flex;
       wingRight.rotation.x = -0.08 - flex;
 
-      const fade = clamp((u - 0.25) / 0.7, 0, 1);
+      // Slower fade out - starts later and takes longer
+      const fade = clamp((u - 0.4) / 0.55, 0, 1);
       for (const { mat, baseOpacity } of planeFadeMats) {
         mat.transparent = true;
         mat.opacity = lerp(baseOpacity, 0.0, fade);
@@ -666,7 +783,7 @@ export function createMysticGlobeWorld(opts: {
     if (scene.fog instanceof FogExp2) scene.fog.density = lerp(0.018, 0.024, 0.5 + 0.5 * Math.sin(t * 0.12));
 
     // Propeller spin (faster right after taps / during escape).
-    const thrustNow = state === "escape" || flapKick > 0.12 || velY > 1.4;
+    const thrustNow = state === "escape" || enginePulse > 0.12 || yVel > 0.9;
     const propSpeed = lerp(14, 26, qualityLevel) * (thrustNow ? 1.35 : 0.75);
     propeller.rotation.x += dt * propSpeed;
 
@@ -830,6 +947,7 @@ function createPlanetTexture() {
   const ctx = c.getContext("2d");
   if (!ctx) throw new Error("2D canvas unavailable.");
 
+  // Base green gradient
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, "#92e26d");
   g.addColorStop(0.55, "#5fcd71");
@@ -837,7 +955,29 @@ function createPlanetTexture() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 
-  // Soft speckles for “flowers” / texture.
+  // Add light-blue snow patches scattered across the globe
+  // These create a wintery feel with soft, organic shapes
+  ctx.globalAlpha = 0.35;
+  const snowColors = ["#b8e4f9", "#d0ecfa", "#c5e8fc"]; // light blue snow tints
+  for (let i = 0; i < 45; i++) {
+    const snowColor = snowColors[Math.floor(Math.random() * snowColors.length)];
+    ctx.fillStyle = snowColor;
+    const cx = Math.random() * w;
+    const cy = Math.random() * h;
+    // Draw irregular snow patches using multiple overlapping circles
+    const patchSize = 12 + Math.random() * 28;
+    const numBlobs = 3 + Math.floor(Math.random() * 5);
+    for (let j = 0; j < numBlobs; j++) {
+      const bx = cx + (Math.random() - 0.5) * patchSize * 0.8;
+      const by = cy + (Math.random() - 0.5) * patchSize * 0.6;
+      const br = patchSize * (0.3 + Math.random() * 0.4);
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Soft speckles for "flowers" / texture.
   ctx.globalAlpha = 0.18;
   const dots = [
     { c: "#ff6b5a", n: 280 },
@@ -855,6 +995,19 @@ function createPlanetTexture() {
       ctx.fill();
     }
   }
+
+  // Add additional small light-blue snow dots for fine detail
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = "#c8eafc";
+  for (let i = 0; i < 180; i++) {
+    const x = Math.random() * w;
+    const y = Math.random() * h;
+    const r = 1.5 + Math.random() * 3;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.globalAlpha = 1;
 
   const tex = new CanvasTexture(c);
@@ -863,7 +1016,7 @@ function createPlanetTexture() {
 }
 
 function randomPointOnPlanet(radius: number, jitter: number) {
-  // Uniform over the full sphere so rotation never reveals an “empty” half.
+  // Uniform over the full sphere so rotation never reveals an "empty" half.
   // (Previous implementation forced y>=0 which populated only one hemisphere.)
   const u = Math.random();
   const v = Math.random();
@@ -872,4 +1025,56 @@ function randomPointOnPlanet(radius: number, jitter: number) {
   const sinPhi = Math.sqrt(Math.max(0, 1 - y * y));
   const r = radius + (Math.random() * 2 - 1) * jitter;
   return new Vector3(r * sinPhi * Math.cos(theta), r * y, r * sinPhi * Math.sin(theta));
+}
+
+/**
+ * Generates `count` unit normals (surface directions) on a sphere with a minimum
+ * angular separation so that objects placed at those locations won't overlap.
+ * Uses rejection sampling with a fallback to random if attempts are exhausted.
+ */
+function generateSeparatedSurfaceNormals(opts: {
+  count: number;
+  minAngleRad: number;
+  maxAttempts: number;
+}): Vector3[] {
+  const { count, minAngleRad, maxAttempts } = opts;
+  const result: Vector3[] = [];
+  const minDot = Math.cos(minAngleRad); // dot threshold for "too close"
+
+  for (let i = 0; i < count; i++) {
+    let candidate: Vector3 | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Uniform point on unit sphere
+      const u = Math.random();
+      const v = Math.random();
+      const theta = 2 * Math.PI * u;
+      const cosP = 2 * v - 1;
+      const sinP = Math.sqrt(Math.max(0, 1 - cosP * cosP));
+      const c = new Vector3(sinP * Math.cos(theta), cosP, sinP * Math.sin(theta));
+
+      // Check against all existing normals
+      let valid = true;
+      for (const existing of result) {
+        if (c.dot(existing) > minDot) {
+          valid = false;
+          break;
+        }
+      }
+      if (valid) {
+        candidate = c;
+        break;
+      }
+    }
+    // Fallback: if we can't find a valid spot, just use the last attempt
+    if (!candidate) {
+      const u = Math.random();
+      const v = Math.random();
+      const theta = 2 * Math.PI * u;
+      const cosP = 2 * v - 1;
+      const sinP = Math.sqrt(Math.max(0, 1 - cosP * cosP));
+      candidate = new Vector3(sinP * Math.cos(theta), cosP, sinP * Math.sin(theta));
+    }
+    result.push(candidate);
+  }
+  return result;
 }

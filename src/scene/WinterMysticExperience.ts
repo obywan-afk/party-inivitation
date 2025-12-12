@@ -98,7 +98,7 @@ export class WinterMysticExperience {
   private introCamCurve: CatmullRomCurve3 | null = null;
   private introTargetCurve: CatmullRomCurve3 | null = null;
   private introFovFrom = 62;
-  private introFovTo = 50;
+  private introFovTo = 42;
   private introExposureFrom = 1.22;
   private introExposureTo = 1.08;
   private tmpCam = new Vector3();
@@ -175,7 +175,8 @@ export class WinterMysticExperience {
       map: endBackdropTex,
       transparent: true,
       opacity: 0,
-      depthTest: false,
+      // Important: keep depth testing ON so it can't paint over the invite card.
+      depthTest: true,
       depthWrite: false,
       side: DoubleSide,
       fog: false,
