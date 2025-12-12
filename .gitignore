@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+.vite
+
+# Local-only invite assets (optional)
+public/poster.png
+public/ambient.mp3
+
+# Local env (Vite)
+.env.local
+.env.*.local
+

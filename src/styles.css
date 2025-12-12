@@ -1,0 +1,188 @@
+:root {
+  color-scheme: dark;
+  --bg: #06080d;
+  --panel: rgba(10, 14, 22, 0.7);
+  --panel2: rgba(10, 14, 22, 0.9);
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.7);
+  --accent: #a6d7ff;
+  --accent2: #ffe2a8;
+  --border: rgba(255, 255, 255, 0.12);
+  --shadow: rgba(0, 0, 0, 0.35);
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  overflow: hidden;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#ui-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ui {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+  gap: 12px;
+}
+
+.topbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.chip {
+  pointer-events: auto;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 10px 12px;
+  box-shadow: 0 10px 30px var(--shadow);
+  font-size: 13px;
+  user-select: none;
+}
+
+.button {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  color: var(--text);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-weight: 600;
+  font-size: 14px;
+  user-select: none;
+  box-shadow: 0 14px 36px var(--shadow);
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+.button.primary {
+  border-color: rgba(166, 215, 255, 0.35);
+  background: linear-gradient(180deg, rgba(166, 215, 255, 0.22), rgba(255, 255, 255, 0.03));
+}
+
+.panel {
+  width: min(520px, calc(100vw - 32px));
+  pointer-events: auto;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 18px 50px var(--shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px 0;
+  letter-spacing: 0.2px;
+}
+
+.muted {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.progress {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress > div {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(166, 215, 255, 0.7), rgba(255, 226, 168, 0.7));
+  border-radius: 999px;
+  transition: width 180ms ease;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  background: radial-gradient(1200px 700px at 50% 30%, rgba(12, 18, 30, 0.4), rgba(6, 8, 13, 0.95));
+  opacity: 1;
+  transition: opacity 520ms ease;
+}
+
+.overlay-inner {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.hint {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
