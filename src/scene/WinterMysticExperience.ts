@@ -1,9 +1,15 @@
 import {
   ACESFilmicToneMapping,
+  CanvasTexture,
   CatmullRomCurve3,
   Clock,
   Color,
+  DoubleSide,
   FogExp2,
+  LinearFilter,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
   PCFSoftShadowMap,
   PerspectiveCamera,
   SRGBColorSpace,
@@ -43,6 +49,10 @@ export class WinterMysticExperience {
 
   private world: ReturnType<typeof createMysticGlobeWorld> | null = null;
 
+  private endBackdrop:
+    | { mesh: Mesh<PlaneGeometry, MeshBasicMaterial>; mat: MeshBasicMaterial; tex: CanvasTexture; opacity: number }
+    | null = null;
+
   private clock = new Clock();
   private raf = 0;
 
@@ -55,11 +65,11 @@ export class WinterMysticExperience {
   private countdownActive = false;
   private countdownTime = 0;
   private countdownShown: number | null = null;
-  private pressing = false;
   private gameOver = false;
   private outroActive = false;
   private outroElapsed = 0;
   private readonly outroDuration = 1.6;
+  private thrustPulse = 0;
 
   private canvasRect: DOMRect | null = null;
   private pointerNdc = new Vector2(0, 0);
@@ -152,6 +162,31 @@ export class WinterMysticExperience {
     camera.position.set(0.0, 2.8, 9.4);
     scene.add(camera);
 
+    // End-screen background: soft bright gray with a warm orange tint.
+    // Rendered as a camera-attached quad so it remains stable and can fade in smoothly.
+    const endBackdropTex = createEndBackdropTexture();
+    endBackdropTex.colorSpace = SRGBColorSpace;
+    endBackdropTex.minFilter = LinearFilter;
+    endBackdropTex.magFilter = LinearFilter;
+    endBackdropTex.generateMipmaps = false;
+    endBackdropTex.needsUpdate = true;
+
+    const endBackdropMat = new MeshBasicMaterial({
+      map: endBackdropTex,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      side: DoubleSide,
+      fog: false,
+      toneMapped: false
+    });
+    const endBackdropMesh = new Mesh(new PlaneGeometry(50, 50), endBackdropMat);
+    endBackdropMesh.renderOrder = -1000;
+    endBackdropMesh.position.set(0, 0, -12);
+    camera.add(endBackdropMesh);
+    this.endBackdrop = { mesh: endBackdropMesh, mat: endBackdropMat, tex: endBackdropTex, opacity: 0 };
+
     const posterTexture = await createPosterTexture(renderer, onProgress);
     posterTexture.generateMipmaps = true;
     posterTexture.anisotropy = clamp(renderer.capabilities.getMaxAnisotropy(), 2, 12);
@@ -223,11 +258,10 @@ export class WinterMysticExperience {
     this.countdownTime = 0;
     this.countdownShown = null;
     this.onCountdownCb?.(null);
-    this.pressing = false;
     this.gameOver = false;
     this.outroActive = false;
     this.outroElapsed = 0;
-    this.world.setThrusting(false);
+    this.thrustPulse = 0;
     this.world.recenter();
     this.pointerNdc.set(0, 0);
     this.resetPosterView();
@@ -250,23 +284,6 @@ export class WinterMysticExperience {
 
   skipIntro() {
     this.finishIntroAndStartPlay();
-  }
-
-  recenter() {
-    if (!this.camera || !this.world) return;
-    this.introActive = false;
-
-    if (this.gameOver) {
-      this.resetPosterView();
-      this.applyPosterViewPose();
-      return;
-    }
-
-    const { recenterCameraPos } = this.world;
-    this.camera.position.copy(recenterCameraPos);
-    this.camera.lookAt(this.playLookTarget);
-    this.smoothLookTarget.copy(this.playLookTarget);
-    this.world.recenter();
   }
 
   dispose() {
@@ -292,6 +309,14 @@ export class WinterMysticExperience {
     this.renderer?.dispose();
 
     this.world?.dispose();
+
+    if (this.endBackdrop) {
+      this.endBackdrop.mesh.removeFromParent();
+      this.endBackdrop.mesh.geometry.dispose();
+      this.endBackdrop.mat.dispose();
+      this.endBackdrop.tex.dispose();
+      this.endBackdrop = null;
+    }
 
     this.renderer = null;
     this.scene = null;
@@ -320,12 +345,15 @@ export class WinterMysticExperience {
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
-    this.pressing = true;
     this.primaryPointerType = e.pointerType;
     this.primaryPointerId = e.pointerId;
     this.canvasRect = this.canvas.getBoundingClientRect();
     if (e.isPrimary) this.canvas.setPointerCapture(e.pointerId);
-    this.world.flap();
+    // Click/tap increments height (mobile-first). No "hold-to-thrust".
+    if (!this.introActive && !this.countdownActive && this.playActive) {
+      this.world.flap();
+      this.thrustPulse = 1;
+    }
     this.onPointerMove(e);
   };
   private onPointerUp = (e: PointerEvent) => {
@@ -343,15 +371,13 @@ export class WinterMysticExperience {
       this.primaryPointerType = null;
       this.primaryPointerId = null;
     }
-    this.pressing = false;
   };
   private onBlur = () => {
-    this.pressing = false;
+    this.thrustPulse = 0;
     this.primaryPointerType = null;
     this.primaryPointerId = null;
     this.posterPointers.clear();
     this.resetPosterGesture();
-    this.world?.setThrusting(false);
     this.setMusicThrusting(false);
   };
   private onPointerMove = (e: PointerEvent) => {
@@ -371,6 +397,10 @@ export class WinterMysticExperience {
     const y01 = (e.clientY - rect.top) / rect.height;
     this.pointerNdc.set(clamp(x01 * 2 - 1, -1, 1), clamp(1 - y01 * 2, -1, 1));
   };
+
+  private getPointerTypeForParallax() {
+    return this.primaryPointerType ?? this.lastPointerType;
+  }
 
   private onWheel = (e: WheelEvent) => {
     if (!this.gameOver || this.outroActive || !this.camera || !this.world) return;
@@ -404,6 +434,15 @@ export class WinterMysticExperience {
 
     const dt = Math.min(0.05, this.clock.getDelta());
     const t = this.clock.elapsedTime;
+
+    // Smooth end-screen backdrop fade.
+    if (this.endBackdrop) {
+      const target = this.gameOver ? 1 : 0;
+      const follow = 1 - Math.exp(-dt * 5.5);
+      this.endBackdrop.opacity += (target - this.endBackdrop.opacity) * follow;
+      this.endBackdrop.mat.opacity = clamp(this.endBackdrop.opacity, 0, 1);
+      this.endBackdrop.mat.needsUpdate = true;
+    }
 
     this.perfScaler?.frame(t);
     this.music?.frame(dt, t);
@@ -453,33 +492,23 @@ export class WinterMysticExperience {
       }
     }
 
-    // Controls:
-    // - Mouse: hold to thrust (keeps the original "tap/press to fly" feel).
-    // - Touch: while finger is down, auto-thrust to chase the desired height (tutorial-like).
-    let thrust = false;
+    // Controls: click/tap to gain height; no continuous thrust.
     if (!this.introActive && !this.countdownActive && this.playActive && !this.gameOver) {
-      const pointerType = this.primaryPointerType ?? this.lastPointerType;
-      const allowAuto = pointerType === "mouse" || this.pressing;
-      if (this.pressing && pointerType === "mouse") {
-        thrust = true;
-      } else if (allowAuto) {
-        this.world.getPlayerPosition(this.tmpPlayer);
-        const targetY = lerp(this.world.playerYMin, this.world.playerYMax, (this.pointerNdc.y + 1) * 0.5);
-        thrust = targetY > this.tmpPlayer.y + 0.06;
-      }
+      this.thrustPulse = Math.max(0, this.thrustPulse - dt * 3.2);
+      this.setMusicThrusting(this.thrustPulse > 0.12);
+    } else {
+      this.thrustPulse = 0;
+      this.setMusicThrusting(false);
     }
-    this.world.setThrusting(thrust);
-    this.setMusicThrusting(thrust);
 
     const state = this.world.update(dt, t);
     if (!this.gameOver && state === "gameover") {
       this.gameOver = true;
       this.outroActive = true;
       this.outroElapsed = 0;
-      this.pressing = false;
+      this.thrustPulse = 0;
       this.primaryPointerType = null;
       this.primaryPointerId = null;
-      this.world.setThrusting(false);
       this.setMusicThrusting(false);
       this.setMusicPhase("outro");
       this.resetPosterView();
@@ -522,8 +551,10 @@ export class WinterMysticExperience {
 
       // Mobile-first "follow finger" parallax: tiny look/cam offsets.
       this.tmpSide.crossVectors(this.tmpUp, this.tmpRadial).normalize();
+      const pointerType = this.getPointerTypeForParallax();
       const px = this.pointerNdc.x;
-      const py = this.pointerNdc.y;
+      // Desktop: mouse should affect zoom only, not vertical framing.
+      const py = pointerType === "mouse" ? 0 : this.pointerNdc.y;
       this.tmpCam.addScaledVector(this.tmpSide, px * 0.55).addScaledVector(this.tmpUp, py * 0.15);
 
       this.tmpTarget.copy(this.tmpPlayer).addScaledVector(this.tmpRadial, -1.25);
@@ -633,7 +664,7 @@ export class WinterMysticExperience {
     this.countdownTime = 3.0;
     this.countdownShown = null;
     this.world.recenter();
-    this.world.setThrusting(false);
+    this.thrustPulse = 0;
     this.setMusicThrusting(false);
     this.setMusicPhase("countdown");
   }
@@ -798,4 +829,41 @@ export class WinterMysticExperience {
 
 function easeInOutCubic(x: number) {
   return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+
+function createEndBackdropTexture(): CanvasTexture {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas unavailable.");
+
+  // Base gradient: warm orange -> bright warm gray.
+  const g = ctx.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, "#ffb36b");
+  g.addColorStop(0.35, "#f6d2b0");
+  g.addColorStop(1, "#ece7e1");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+
+  // Gentle vignette to keep focus on the invite.
+  const v = ctx.createRadialGradient(size * 0.5, size * 0.5, size * 0.1, size * 0.5, size * 0.5, size * 0.7);
+  v.addColorStop(0, "rgba(255,255,255,0)");
+  v.addColorStop(1, "rgba(210,200,190,0.25)");
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, size, size);
+
+  // Subtle noise so it doesn't look flat/banded.
+  ctx.globalAlpha = 0.08;
+  for (let i = 0; i < 9000; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const a = 0.25 + Math.random() * 0.35;
+    ctx.fillStyle = `rgba(255,180,120,${a})`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  return new CanvasTexture(canvas);
 }

@@ -12,7 +12,6 @@ export type OverlayUI = {
 export function createOverlayUI(opts: {
   root: HTMLElement;
   onEnter: () => void | Promise<void>;
-  onRecenter: () => void;
   onMuteToggle: () => void;
   getMuted: () => boolean;
 }): OverlayUI {
@@ -45,32 +44,11 @@ export function createOverlayUI(opts: {
   const topbar = document.createElement("div");
   topbar.className = "topbar";
 
-  const left = document.createElement("div");
-  left.className = "chip";
-  left.setAttribute("data-quality", "auto");
-  left.innerHTML = `
-    <span class="chip-dot" aria-hidden="true"></span>
-    <span class="chip-text">Auto quality</span>
-  `;
-  topbar.appendChild(left);
-
   const right = document.createElement("div");
   right.style.display = "flex";
   right.style.gap = "10px";
   right.style.pointerEvents = "auto";
   topbar.appendChild(right);
-
-  const muteBtn = document.createElement("button");
-  muteBtn.className = "button";
-  muteBtn.type = "button";
-  muteBtn.textContent = "Mute";
-  right.appendChild(muteBtn);
-
-  const recenterBtn = document.createElement("button");
-  recenterBtn.className = "button primary";
-  recenterBtn.type = "button";
-  recenterBtn.textContent = "Recenter";
-  right.appendChild(recenterBtn);
 
   const countdown = document.createElement("div");
   countdown.className = "countdown";
@@ -91,10 +69,6 @@ export function createOverlayUI(opts: {
     ringBar.style.strokeDashoffset = `${ringCircumference}`;
   }
 
-  function refreshMuteLabel() {
-    muteBtn.textContent = opts.getMuted() ? "Unmute" : "Mute";
-  }
-
   function setProgress(p: number) {
     const clamped = Math.max(0, Math.min(1, p));
     if (ringBar) {
@@ -103,19 +77,7 @@ export function createOverlayUI(opts: {
   }
 
   function setPerfHint(h: PerfHint) {
-    const text = left.querySelector<HTMLElement>(".chip-text");
-    if (!h) {
-      left.setAttribute("data-quality", "auto");
-      if (text) text.textContent = "Auto quality";
-      return;
-    }
-    if (h === "quality-low") {
-      left.setAttribute("data-quality", "low");
-      if (text) text.textContent = "Auto quality • lowered";
-    } else {
-      left.setAttribute("data-quality", "high");
-      if (text) text.textContent = "Auto quality • high";
-    }
+    void h;
   }
 
   function setCountdown(n: number | null) {
@@ -135,7 +97,6 @@ export function createOverlayUI(opts: {
   async function enter() {
     if (status !== "ready") return;
     setStatus("running");
-    refreshMuteLabel();
     await opts.onEnter();
   }
 
@@ -150,8 +111,6 @@ export function createOverlayUI(opts: {
       enterBtn.classList.remove("is-ready");
       enterBtn.setAttribute("aria-label", "Loading");
       enterBtn.title = "Loading…";
-      muteBtn.style.display = "none";
-      recenterBtn.style.display = "none";
       return;
     }
 
@@ -164,8 +123,6 @@ export function createOverlayUI(opts: {
       enterBtn.classList.add("is-ready");
       enterBtn.setAttribute("aria-label", "Tap to begin");
       enterBtn.title = "Tap to begin";
-      muteBtn.style.display = "none";
-      recenterBtn.style.display = "none";
       return;
     }
 
@@ -173,9 +130,6 @@ export function createOverlayUI(opts: {
       overlay.style.opacity = "0";
       overlay.style.pointerEvents = "none";
       topbar.style.display = "flex";
-      muteBtn.style.display = "inline-flex";
-      recenterBtn.style.display = "inline-flex";
-      refreshMuteLabel();
       window.setTimeout(() => {
         if (status === "running") overlay.style.display = "none";
       }, 540);
@@ -190,19 +144,10 @@ export function createOverlayUI(opts: {
     enterBtn.setAttribute("aria-label", "Unavailable");
     enterBtn.title = errorMessage ? `Error: ${errorMessage}` : "Something went wrong.";
     enterBtn.classList.remove("is-ready");
-    muteBtn.style.display = "none";
-    recenterBtn.style.display = "none";
   }
 
   enterBtn.addEventListener("click", () => {
     void enter();
-  });
-  muteBtn.addEventListener("click", () => {
-    opts.onMuteToggle();
-    refreshMuteLabel();
-  });
-  recenterBtn.addEventListener("click", () => {
-    opts.onRecenter();
   });
 
   function onKeydown(e: KeyboardEvent) {

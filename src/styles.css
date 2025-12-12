@@ -97,7 +97,7 @@ body {
   left: calc(12px + env(safe-area-inset-left));
   right: calc(12px + env(safe-area-inset-right));
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
   pointer-events: none;

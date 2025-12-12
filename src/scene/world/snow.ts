@@ -4,6 +4,7 @@ import {
   CanvasTexture,
   type ColorRepresentation,
   Float32BufferAttribute,
+  NormalBlending,
   Points,
   PointsMaterial,
   SRGBColorSpace,
@@ -36,11 +37,15 @@ export function createSnowPoints(opts: {
   radius: number;
   height: number;
   color?: ColorRepresentation;
+  blend?: "additive" | "diffuse";
+  intensity?: number;
 }) {
   const baseCount = opts.count;
   const radius = opts.radius;
   const height = opts.height;
   const color = opts.color ?? 0xbfd6ff;
+  const blending = opts.blend === "diffuse" ? NormalBlending : AdditiveBlending;
+  const intensity = clamp(opts.intensity ?? 1, 0.5, 2);
 
   const positions = new Float32Array(baseCount * 3);
   const velocities = new Float32Array(baseCount);
@@ -70,7 +75,7 @@ export function createSnowPoints(opts: {
     transparent: true,
     opacity: 0.65,
     depthWrite: false,
-    blending: AdditiveBlending,
+    blending,
     color
   });
 
@@ -80,8 +85,8 @@ export function createSnowPoints(opts: {
   let quality = 1;
   function setQuality(level: number) {
     quality = clamp(level, 0.25, 1);
-    mat.size = 0.04 + 0.03 * quality;
-    mat.opacity = 0.42 + 0.28 * quality;
+    mat.size = (0.04 + 0.03 * quality) * intensity;
+    mat.opacity = clamp((0.42 + 0.28 * quality) * intensity, 0, 0.95);
     mat.needsUpdate = true;
   }
 

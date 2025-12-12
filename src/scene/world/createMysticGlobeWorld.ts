@@ -8,6 +8,7 @@ import {
   Group,
   HemisphereLight,
   InstancedMesh,
+  MeshBasicMaterial,
   MeshLambertMaterial,
   MathUtils,
   Mesh,
@@ -62,7 +63,8 @@ export function createMysticGlobeWorld(opts: {
   scene.fog = new FogExp2(skyColor, 0.02);
 
   const planetRadius = 4.1;
-  const planetCenter = new Vector3(0, -2.65, 0);
+  // Slightly lower to frame the scene “higher” (more sky above the globe).
+  const planetCenter = new Vector3(0, -2.95, 0);
   const orbitCenter = planetCenter.clone();
 
   // Invite settles above the planet.
@@ -155,12 +157,16 @@ export function createMysticGlobeWorld(opts: {
 
   // Snow particles (GPU-friendly Points) to make it feel "winter".
   const snow = createSnowPoints({
-    count: isMobile ? 1100 : 2200,
-    radius: 12.5,
+    count: isMobile ? 1700 : 3400,
+    radius: 13.5,
     height: 9.5,
-    color: 0x4aa3ff
+    // Push towards a colder / bluer snow tint.
+    color: 0x1f6dff,
+    blend: "diffuse",
+    intensity: 1.45
   });
-  snow.points.position.set(orbitCenter.x, -1.8, orbitCenter.z);
+  // Keep the same offset relative to the orbit center even if the globe framing changes.
+  snow.points.position.set(orbitCenter.x, orbitCenter.y + 0.85, orbitCenter.z);
   root.add(snow.points);
 
   // Layout on the planet surface.
@@ -168,6 +174,11 @@ export function createMysticGlobeWorld(opts: {
   const up = new Vector3(0, 1, 0);
   const n = new Vector3();
   const tangentYaw = new Vector3();
+  const treeTrunkHeight = 0.38;
+  const treeTierHeight = 0.32;
+  const houseBaseHeight = 0.42;
+  const houseDepth = 0.52;
+  const houseRoofHeight = 0.36;
 
   for (let i = 0; i < treeCount; i++) {
     const p = randomPointOnPlanet(planetRadius, 0.05);
@@ -175,7 +186,19 @@ export function createMysticGlobeWorld(opts: {
     const s = 0.65 + Math.random() * 0.55;
 
     // Oriented outward from the planet.
-    dummy.position.copy(n).multiplyScalar(planetRadius + 0.03);
+    const trunkBottomClearance = 0.02;
+    const trunkCenterOffset = trunkBottomClearance + (treeTrunkHeight * s) / 2;
+    const tierOverlap = 0.02 * s;
+    const tierBaseStep = treeTierHeight * s * 0.55;
+    const trunkTopOffset = trunkBottomClearance + treeTrunkHeight * s;
+    const tier1Base = trunkTopOffset - tierOverlap;
+    const tier2Base = tier1Base + tierBaseStep;
+    const tier3Base = tier2Base + tierBaseStep;
+    const tier1CenterOffset = tier1Base + (treeTierHeight * s) / 2;
+    const tier2CenterOffset = tier2Base + (treeTierHeight * s) / 2;
+    const tier3CenterOffset = tier3Base + (treeTierHeight * s) / 2;
+
+    dummy.position.copy(n).multiplyScalar(planetRadius + trunkCenterOffset);
     dummy.quaternion.setFromUnitVectors(up, n);
     // Add a random twist around the normal for variety.
     dummy.rotateOnAxis(n, Math.random() * Math.PI * 2);
@@ -183,15 +206,15 @@ export function createMysticGlobeWorld(opts: {
     dummy.updateMatrix();
     trees.trunkInst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.copy(n).multiplyScalar(planetRadius + 0.45 * s);
+    dummy.position.copy(n).multiplyScalar(planetRadius + tier1CenterOffset);
     dummy.updateMatrix();
     trees.tier1Inst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.copy(n).multiplyScalar(planetRadius + 0.72 * s);
+    dummy.position.copy(n).multiplyScalar(planetRadius + tier2CenterOffset);
     dummy.updateMatrix();
     trees.tier2Inst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.copy(n).multiplyScalar(planetRadius + 0.98 * s);
+    dummy.position.copy(n).multiplyScalar(planetRadius + tier3CenterOffset);
     dummy.updateMatrix();
     trees.tier3Inst.setMatrixAt(i, dummy.matrix);
   }
@@ -205,14 +228,22 @@ export function createMysticGlobeWorld(opts: {
     n.copy(p).normalize();
     const s = 0.75 + Math.random() * 0.75;
 
-    dummy.position.copy(n).multiplyScalar(planetRadius + 0.06);
+    const baseBottomClearance = 0.02;
+    const baseCenterOffset = baseBottomClearance + (houseBaseHeight * s) / 2;
+    const roofOverlap = 0.015 * s;
+    const roofCenterOffset = baseBottomClearance + houseBaseHeight * s + (houseRoofHeight * s) / 2 - roofOverlap;
+    const windowUpOffset = baseBottomClearance + houseBaseHeight * s * 0.55;
+    const windowOutOffset = (houseDepth * s) / 2 + 0.01 * s;
+
+    dummy.position.copy(n).multiplyScalar(planetRadius + baseCenterOffset);
     dummy.quaternion.setFromUnitVectors(up, n);
-    dummy.rotateOnAxis(n, Math.random() * Math.PI * 2);
+    // Quantize yaw so the roof doesn't look randomly "twisted".
+    dummy.rotateOnAxis(n, Math.floor(Math.random() * 4) * (Math.PI / 2));
     dummy.scale.setScalar(s);
     dummy.updateMatrix();
     houses.baseInst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.copy(n).multiplyScalar(planetRadius + 0.42 * s);
+    dummy.position.copy(n).multiplyScalar(planetRadius + roofCenterOffset);
     dummy.updateMatrix();
     houses.roofInst.setMatrixAt(i, dummy.matrix);
 
@@ -220,8 +251,8 @@ export function createMysticGlobeWorld(opts: {
     tangentYaw.set(0, 0, 1).applyQuaternion(dummy.quaternion);
     dummy.position
       .copy(n)
-      .multiplyScalar(planetRadius + 0.22 * s)
-      .addScaledVector(tangentYaw, 0.18 * s);
+      .multiplyScalar(planetRadius + windowUpOffset)
+      .addScaledVector(tangentYaw, windowOutOffset);
     dummy.updateMatrix();
     houses.windowInst.setMatrixAt(i, dummy.matrix);
   }
@@ -361,20 +392,15 @@ export function createMysticGlobeWorld(opts: {
   const a4Height = 1.38;
   const a4Width = a4Height * (210 / 297);
   const inviteGeo = new PlaneGeometry(a4Width, a4Height, 1, 1);
-  const inviteFrontMat = new MeshStandardMaterial({
+  // Use an unlit material so the poster doesn't get a “white cast” from scene lighting.
+  const inviteFrontMat = new MeshBasicMaterial({
     map: posterTexture,
-    roughness: 0.5,
-    metalness: 0.0,
-    emissive: new Color(0x0a0b12),
-    emissiveIntensity: 0.0
+    toneMapped: false
   });
-  const inviteBackMat = new MeshStandardMaterial({
+  const inviteBackMat = new MeshBasicMaterial({
     color: new Color(0x0b0d1e),
-    roughness: 0.9,
-    metalness: 0.0,
-    emissive: new Color(0x05060f),
-    emissiveIntensity: 0.0,
-    side: DoubleSide
+    side: DoubleSide,
+    toneMapped: false
   });
 
   const inviteGroup = new Group();
@@ -394,7 +420,6 @@ export function createMysticGlobeWorld(opts: {
 
   // Gameplay state.
   let qualityLevel = 1;
-  let thrusting = false;
   let state: GameState = "idle";
   let playElapsed = 0;
   let gameOverElapsed = 0;
@@ -406,6 +431,10 @@ export function createMysticGlobeWorld(opts: {
   const tmpV = new Vector3();
   const escapeStart = new Vector3();
   const escapeEnd = new Vector3();
+  let escapeStartRotX = 0;
+  let escapeStartRotY = 0;
+  let escapeStartRotZ = 0;
+  let escapeWobble = 0;
 
   // 2D-ish motion: player moves only on Y; the world motion comes from rolling the planet.
   const playerX = 0;
@@ -458,10 +487,6 @@ export function createMysticGlobeWorld(opts: {
     recenter();
   }
 
-  function setThrusting(next: boolean) {
-    thrusting = next;
-  }
-
   function recenter() {
     velY = 0;
     y = baseY;
@@ -472,7 +497,8 @@ export function createMysticGlobeWorld(opts: {
   function flap() {
     if (state !== "playing") return;
     velY = Math.max(velY, 0);
-    velY = clamp(velY + 3.1, -8.0, 8.0);
+    // Click/tap impulse (mobile-first). Smaller kick => more taps needed to reach escape.
+    velY = clamp(velY + 2.45, -8.0, 8.0);
     flapKick = 1;
   }
 
@@ -491,9 +517,13 @@ export function createMysticGlobeWorld(opts: {
     playerPos.set(playerX, y, playerZ);
     player.position.copy(playerPos);
     escapeStart.copy(player.position);
+    escapeStartRotX = player.rotation.x;
+    escapeStartRotY = player.rotation.y;
+    escapeStartRotZ = player.rotation.z;
+    escapeWobble = (Math.random() * 2 - 1) * 0.9;
     escapeEnd
       .copy(escapeStart)
-      .add(new Vector3(6.8, 5.2, -4.8))
+      .add(new Vector3(8.6, 4.6, -7.2))
       .add(new Vector3((Math.random() - 0.5) * 1.4, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2));
   }
 
@@ -529,12 +559,10 @@ export function createMysticGlobeWorld(opts: {
     if (state === "playing") {
       playElapsed += dt;
 
-      // "Hold to flap": classic vertical motion.
-      const upAccel = 4.7;
-      const gravity = -6.3;
-      const accel = thrusting ? upAccel : gravity;
+      // Click/tap-driven motion: gravity + discrete flap impulses.
+      const gravity = -6.8;
 
-      velY = clamp(velY + accel * dt, -8.0, 8.0);
+      velY = clamp(velY + gravity * dt, -8.0, 8.0);
       velY *= Math.pow(0.985, dt * 60);
 
       y = y + velY * dt;
@@ -554,16 +582,16 @@ export function createMysticGlobeWorld(opts: {
       flapKick = Math.max(0, flapKick - dt * 6.5);
 
       // If you climb high enough, fly away and reveal the invite.
-      const escapeY = baseY + 3.55;
+      const escapeY = baseY + 4.35;
       if (y >= escapeY) {
         escapeCharge += dt;
       } else {
-        escapeCharge = Math.max(0, escapeCharge - dt * 2.2);
+        escapeCharge = Math.max(0, escapeCharge - dt * 3.6);
       }
-      if (escapeCharge >= 0.18) triggerEscape();
+      if (escapeCharge >= 0.65) triggerEscape();
 
       // Fail-safe: auto-finish into invite after a while.
-      if (playElapsed >= 20) triggerGameOver();
+      if (playElapsed >= 90) triggerGameOver();
     }
 
     if (state === "playing") syncPlayerPose(dt);
@@ -575,9 +603,15 @@ export function createMysticGlobeWorld(opts: {
       const eased = 1 - Math.pow(1 - u, 3);
 
       player.position.lerpVectors(escapeStart, escapeEnd, eased);
+      // Add a small arc + bank so the fly-away feels less "snapped".
+      const arc = Math.sin(u * Math.PI);
+      player.position.y += arc * 0.75;
+      player.position.z += arc * (-0.55);
+
       player.rotation.set(0, 0, 0);
-      player.rotation.y = lerp(0.0, 0.55, eased);
-      player.rotation.z = lerp(-0.25, -1.05, eased);
+      player.rotation.x = lerp(escapeStartRotX, 0.28, eased) + arc * 0.05 * escapeWobble;
+      player.rotation.y = lerp(escapeStartRotY, 0.9, eased);
+      player.rotation.z = lerp(escapeStartRotZ, -0.8, eased) + arc * 0.08 * escapeWobble;
 
       const flex = Math.sin((t + escapeElapsed) * 16.0) * 0.08 + (1 - eased) * 0.14;
       wingLeft.rotation.x = 0.08 + flex;
@@ -631,8 +665,8 @@ export function createMysticGlobeWorld(opts: {
     // Slight sky haze drift.
     if (scene.fog instanceof FogExp2) scene.fog.density = lerp(0.018, 0.024, 0.5 + 0.5 * Math.sin(t * 0.12));
 
-    // Propeller spin (faster while thrusting).
-    const thrustNow = state === "playing" ? thrusting : state === "escape";
+    // Propeller spin (faster right after taps / during escape).
+    const thrustNow = state === "escape" || flapKick > 0.12 || velY > 1.4;
     const propSpeed = lerp(14, 26, qualityLevel) * (thrustNow ? 1.35 : 0.75);
     propeller.rotation.x += dt * propSpeed;
 
@@ -690,7 +724,6 @@ export function createMysticGlobeWorld(opts: {
     shouldUsePostFX,
     setQualityLevel,
     start,
-    setThrusting,
     flap,
     recenter,
     triggerGameOver,

@@ -18,7 +18,6 @@ export function createApp(opts: { canvas: HTMLCanvasElement; uiRoot: HTMLDivElem
       audio.setPhase("intro");
       experience.begin();
     },
-    onRecenter: () => experience.recenter(),
     onMuteToggle: () => audio.toggleMuted(),
     getMuted: () => audio.muted
   });
