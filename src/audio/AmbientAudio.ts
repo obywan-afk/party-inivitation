@@ -33,7 +33,7 @@ export class AmbientAudio {
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 5200;
+    filter.frequency.value = 4200;
     filter.Q.value = 0.7;
     this.filter = filter;
 
@@ -132,13 +132,36 @@ export class AmbientAudio {
         events.push({ start, dur, freq, phase, rate, amp });
       }
 
+      // Precompute longer "wind whistle" accents (subtle, musical timing).
+      const whistleEvents: Array<{
+        start: number;
+        dur: number;
+        f0: number;
+        f1: number;
+        phase: number;
+        rate: number;
+        amp: number;
+      }> = [];
+      // Intentionally avoid the loop seam window.
+      const starts = [0.75, 2.85, 5.25];
+      for (let w = 0; w < starts.length; w++) {
+        const start = Math.min(seconds - 1.9, starts[w] + (Math.random() - 0.5) * 0.18);
+        const dur = 0.95 + Math.random() * 0.75;
+        const f0 = 760 + Math.random() * 260;
+        const f1 = 1120 + Math.random() * 520;
+        const phase = Math.random() * TAU;
+        const rate = 4.2 + Math.random() * 2.2;
+        const amp = 0.016 + Math.random() * 0.018;
+        whistleEvents.push({ start, dur, f0, f1, phase, rate, amp });
+      }
+
       let brown = 0;
       let lp = 0;
       let hpLp = 0;
 
       // Hat highpass.
       let hatHpLp = 0;
-      const hatHpCut = 6500;
+      const hatHpCut = 5200;
       const aHatHP = 1 - Math.exp((-TAU * hatHpCut) / sr);
 
       // Bass oscillator.
@@ -179,6 +202,26 @@ export class AmbientAudio {
         }
         out += shimmer * 0.8;
 
+        // Wind whistles (gliss + slight vibrato).
+        let whistle = 0;
+        for (let w = 0; w < whistleEvents.length; w++) {
+          const ev = whistleEvents[w];
+          const dt = t - ev.start;
+          if (dt < 0 || dt > ev.dur) continue;
+          const u = dt / ev.dur;
+          const win = Math.sin(Math.PI * u);
+          const env = win * win;
+          const k = (ev.f1 - ev.f0) / ev.dur;
+          const phaseMod = 0.38 * Math.sin(TAU * ev.rate * t + ev.phase);
+          const ph = TAU * (ev.f0 * dt + 0.5 * k * dt * dt) + ev.phase + phaseMod;
+          // Gentle harmonic for "whistle" character.
+          const s = Math.sin(ph) + 0.22 * Math.sin(ph * 2.0);
+          // Breathiness rides on wind level.
+          const breath = (0.7 + 0.6 * lfo) * (0.8 + 0.2 * Math.sin(TAU * 0.2 * t + ch));
+          whistle += s * env * ev.amp * breath;
+        }
+        out += whistle;
+
         // --- Techno layer ---
         const tBeat = t % spb; // time since last beat
         const tBar = t % bar;
@@ -205,7 +248,7 @@ export class AmbientAudio {
           const n = Math.random() * 2 - 1;
           hatHpLp += (n - hatHpLp) * (1 - Math.exp((-TAU * 1800) / sr));
           const bp = n - hatHpLp;
-          clap = Math.tanh(bp * 1.6) * env * 0.12;
+          clap = Math.tanh(bp * 1.6) * env * 0.1;
         }
 
         // 16th hats (bright, rolling).
@@ -219,8 +262,8 @@ export class AmbientAudio {
           const hp = n - hatHpLp;
           // Accents on off-16ths.
           const step = Math.floor(t / step16) % 16;
-          const accent = step % 4 === 2 ? 1.35 : 1.0;
-          hat = Math.tanh(hp * 2.2) * env * 0.065 * accent;
+          const accent = step % 4 === 2 ? 1.22 : 1.0;
+          hat = Math.tanh(hp * 2.0) * env * 0.052 * accent;
         }
 
         // Rolling bass on 8ths.

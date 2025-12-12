@@ -59,6 +59,7 @@ body {
   align-items: center;
   gap: 10px;
   pointer-events: none;
+  z-index: 3;
 }
 
 .chip {
@@ -197,6 +198,7 @@ body {
     linear-gradient(180deg, rgba(6, 8, 13, 0.72), rgba(6, 8, 13, 0.95));
   opacity: 1;
   transition: opacity 520ms ease;
+  z-index: 2;
 }
 
 .overlay::before {
@@ -228,6 +230,8 @@ body {
 
 .overlay-inner {
   width: min(560px, calc(100vw - 32px));
+  position: relative;
+  z-index: 1;
 }
 
 .hero {
@@ -396,10 +400,15 @@ body {
   bottom: calc(14px + env(safe-area-inset-bottom));
   display: grid;
   place-items: center;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  text-align: center;
+  text-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
   opacity: 0;
   transform: translateY(10px);
   transition: opacity 320ms ease, transform 320ms ease;
   pointer-events: none;
+  z-index: 2;
 }
 
 .hud-hint.show {
@@ -409,6 +418,7 @@ body {
 
 .hud-hint::before {
   content: "";
+  display: block;
   width: min(640px, calc(100vw - 32px));
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
@@ -416,11 +426,13 @@ body {
   opacity: 0.6;
 }
 
-.hud-hint {
-  color: rgba(255, 255, 255, 0.70);
-  font-size: 12px;
-  text-align: center;
-  text-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+@media (max-width: 380px) {
+  .panel {
+    padding: 14px;
+  }
+  .play-wrap {
+    padding: 16px 14px 14px 14px;
+  }
 }
 
 @keyframes aurora {

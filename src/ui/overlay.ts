@@ -203,6 +203,7 @@ export function createOverlayUI(opts: {
     if (status === "loading") {
       overlay.style.display = "grid";
       overlay.style.opacity = "1";
+      overlay.style.pointerEvents = "auto";
       topbar.style.display = "none";
       ctaLabel.textContent = "Loading…";
       loadingText.textContent = "Loading…";
@@ -217,6 +218,7 @@ export function createOverlayUI(opts: {
     if (status === "ready") {
       overlay.style.display = "grid";
       overlay.style.opacity = "1";
+      overlay.style.pointerEvents = "auto";
       topbar.style.display = "none";
       ctaLabel.textContent = "Tap to Begin";
       loadingText.textContent = "Audio starts after tap (autoplay rules).";
@@ -230,6 +232,7 @@ export function createOverlayUI(opts: {
 
     if (status === "running") {
       overlay.style.opacity = "0";
+      overlay.style.pointerEvents = "none";
       topbar.style.display = "flex";
       skipBtn.style.display = "inline-flex";
       muteBtn.style.display = "inline-flex";
@@ -243,6 +246,7 @@ export function createOverlayUI(opts: {
 
     overlay.style.display = "grid";
     overlay.style.opacity = "1";
+    overlay.style.pointerEvents = "auto";
     topbar.style.display = "none";
     ctaLabel.textContent = "Unavailable";
     loadingText.textContent = errorMessage ? `Error: ${errorMessage}` : "Something went wrong.";
