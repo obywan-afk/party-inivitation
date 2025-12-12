@@ -358,7 +358,8 @@ export class WinterMysticExperience {
     this.onPointerMove(e);
   };
   private onPointerUp = (e: PointerEvent) => {
-    if (!this.world) return;
+    const camera = this.camera;
+    if (!this.world || !camera) return;
     if (this.posterPointers.has(e.pointerId)) {
       this.posterPointers.delete(e.pointerId);
       if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
@@ -683,12 +684,16 @@ export class WinterMysticExperience {
   }
 
   private updatePosterBaseDistanceAndPose() {
-    if (!this.world) return;
-    // Fit the poster to ~90% viewport height at zoom=1.
+    const camera = this.camera;
+    if (!this.world || !camera) return;
+    // Fit the poster so it covers ~90% of whichever axis is smaller (height or width) at zoom=1.
     const fovDeg = 46;
     const fovRad = (fovDeg * Math.PI) / 180;
     const fill = 0.9;
-    this.posterBaseDistance = (this.world.posterHeight / fill) / (2 * Math.tan(fovRad / 2));
+    const heightDistance = (this.world.posterHeight / fill) / (2 * Math.tan(fovRad / 2));
+    const widthDistance =
+      (this.world.posterWidth / fill) / (2 * Math.tan(fovRad / 2) * camera.aspect);
+    this.posterBaseDistance = Math.max(heightDistance, widthDistance);
     this.outroCamPos.copy(this.world.posterTarget).add(new Vector3(0, 0, this.posterBaseDistance));
   }
 

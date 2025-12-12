@@ -473,7 +473,6 @@ export function createMysticGlobeWorld(opts: {
   const escapeEnd = new Vector3();
   let escapeStartRotX = 0;
   let escapeStartRotY = 0;
-  let escapeStartRotZ = 0;
   let escapeWobble = 0;
 
   // 2D-ish motion: player moves only on Y; the world motion comes from rolling the planet.
@@ -580,7 +579,6 @@ export function createMysticGlobeWorld(opts: {
     escapeStart.copy(player.position);
     escapeStartRotX = player.rotation.x;
     escapeStartRotY = player.rotation.y;
-    escapeStartRotZ = player.rotation.z;
     escapeWobble = (Math.random() * 2 - 1) * 0.9;
     escapeEnd
       .copy(escapeStart)
@@ -1013,18 +1011,6 @@ function createPlanetTexture() {
   const tex = new CanvasTexture(c);
   tex.needsUpdate = true;
   return tex;
-}
-
-function randomPointOnPlanet(radius: number, jitter: number) {
-  // Uniform over the full sphere so rotation never reveals an "empty" half.
-  // (Previous implementation forced y>=0 which populated only one hemisphere.)
-  const u = Math.random();
-  const v = Math.random();
-  const theta = 2 * Math.PI * u;
-  const y = 2 * v - 1; // cos(phi) in [-1..1]
-  const sinPhi = Math.sqrt(Math.max(0, 1 - y * y));
-  const r = radius + (Math.random() * 2 - 1) * jitter;
-  return new Vector3(r * sinPhi * Math.cos(theta), r * y, r * sinPhi * Math.sin(theta));
 }
 
 /**
