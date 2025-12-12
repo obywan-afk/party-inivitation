@@ -71,11 +71,14 @@ export class WinterMysticExperience {
   // Poster view (game over): pan + zoom the invite.
   private posterPan = new Vector2(0, 0);
   private posterZoom = 1;
+  private posterYaw = 0;
+  private posterPitch = 0;
   private posterBaseDistance = 2;
-  private posterPointers = new Map<number, { x: number; y: number }>();
+  private posterPointers = new Map<number, { x: number; y: number; mode: "rotate" | "pan" }>();
   private posterGesture:
+    | { mode: "rotate"; lastX: number; lastY: number }
     | { mode: "pan"; lastX: number; lastY: number }
-    | { mode: "pinch"; lastCx: number; lastCy: number; lastDist: number }
+    | { mode: "pinch"; lastCx: number; lastCy: number; lastDist: number; lastAngle: number }
     | null = null;
 
   // Mobile viewport stability (iOS Safari address-bar collapse/expand).
@@ -199,6 +202,7 @@ export class WinterMysticExperience {
     this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: true });
     this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: true });
     this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
+    this.canvas.addEventListener("contextmenu", this.onContextMenu);
     window.addEventListener("pointerup", this.onPointerUp, { passive: true });
     window.addEventListener("pointercancel", this.onPointerUp, { passive: true });
     window.addEventListener("blur", this.onBlur, { passive: true });
@@ -279,6 +283,7 @@ export class WinterMysticExperience {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
     this.canvas.removeEventListener("wheel", this.onWheel);
+    this.canvas.removeEventListener("contextmenu", this.onContextMenu);
     window.removeEventListener("pointerup", this.onPointerUp);
     window.removeEventListener("pointercancel", this.onPointerUp);
     window.removeEventListener("blur", this.onBlur);
@@ -301,11 +306,16 @@ export class WinterMysticExperience {
     cancelAnimationFrame(this.resizeRaf);
     this.resizeRaf = requestAnimationFrame(() => this.resize());
   };
+  private onContextMenu = (e: MouseEvent) => {
+    if (this.running) e.preventDefault();
+  };
   private onPointerDown = (e: PointerEvent) => {
     if (!this.running || !this.world) return;
     if (this.gameOver) {
+      if (this.outroActive) return;
       this.canvasRect = this.canvas.getBoundingClientRect();
-      this.posterPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const mode: "rotate" | "pan" = e.button === 2 ? "pan" : "rotate";
+      this.posterPointers.set(e.pointerId, { x: e.clientX, y: e.clientY, mode });
       this.resetPosterGesture();
       this.canvas.setPointerCapture(e.pointerId);
       return;
@@ -346,7 +356,9 @@ export class WinterMysticExperience {
   };
   private onPointerMove = (e: PointerEvent) => {
     if (this.gameOver && this.posterPointers.has(e.pointerId)) {
-      this.posterPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const prev = this.posterPointers.get(e.pointerId);
+      if (!prev) return;
+      this.posterPointers.set(e.pointerId, { x: e.clientX, y: e.clientY, mode: prev.mode });
       this.applyPosterGesture();
       return;
     }
@@ -629,6 +641,8 @@ export class WinterMysticExperience {
   private resetPosterView() {
     this.posterPan.set(0, 0);
     this.posterZoom = 1;
+    this.posterYaw = 0;
+    this.posterPitch = 0;
     this.updatePosterBaseDistanceAndPose();
   }
 
@@ -668,8 +682,24 @@ export class WinterMysticExperience {
 
     if (pointers.length === 1) {
       const p = pointers[0];
-      if (!this.posterGesture || this.posterGesture.mode !== "pan") {
-        this.posterGesture = { mode: "pan", lastX: p.x, lastY: p.y };
+      if (p.mode === "pan") {
+        if (!this.posterGesture || this.posterGesture.mode !== "pan") {
+          this.posterGesture = { mode: "pan", lastX: p.x, lastY: p.y };
+          return;
+        }
+        const dx = p.x - this.posterGesture.lastX;
+        const dy = p.y - this.posterGesture.lastY;
+        this.posterGesture.lastX = p.x;
+        this.posterGesture.lastY = p.y;
+
+        this.posterPan.x -= dx * unitsPerPxX;
+        this.posterPan.y += dy * unitsPerPxY;
+        this.applyPosterViewPose();
+        return;
+      }
+
+      if (!this.posterGesture || this.posterGesture.mode !== "rotate") {
+        this.posterGesture = { mode: "rotate", lastX: p.x, lastY: p.y };
         return;
       }
       const dx = p.x - this.posterGesture.lastX;
@@ -677,8 +707,9 @@ export class WinterMysticExperience {
       this.posterGesture.lastX = p.x;
       this.posterGesture.lastY = p.y;
 
-      this.posterPan.x -= dx * unitsPerPxX;
-      this.posterPan.y += dy * unitsPerPxY;
+      const rotPerPx = 0.005;
+      this.posterYaw = clamp(this.posterYaw - dx * rotPerPx, -1.15, 1.15);
+      this.posterPitch = clamp(this.posterPitch - dy * rotPerPx, -0.85, 0.85);
       this.applyPosterViewPose();
       return;
     }
@@ -689,21 +720,29 @@ export class WinterMysticExperience {
     const cx = (a.x + b.x) * 0.5;
     const cy = (a.y + b.y) * 0.5;
     const d = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
     if (!this.posterGesture || this.posterGesture.mode !== "pinch") {
-      this.posterGesture = { mode: "pinch", lastCx: cx, lastCy: cy, lastDist: d };
+      this.posterGesture = { mode: "pinch", lastCx: cx, lastCy: cy, lastDist: d, lastAngle: ang };
       return;
     }
 
     const dx = cx - this.posterGesture.lastCx;
     const dy = cy - this.posterGesture.lastCy;
     const ratio = d / this.posterGesture.lastDist;
+    let dAng = ang - this.posterGesture.lastAngle;
+    // Wrap to [-pi, pi] to avoid jumps when crossing the branch cut.
+    if (dAng > Math.PI) dAng -= Math.PI * 2;
+    if (dAng < -Math.PI) dAng += Math.PI * 2;
     this.posterGesture.lastCx = cx;
     this.posterGesture.lastCy = cy;
     this.posterGesture.lastDist = d;
+    this.posterGesture.lastAngle = ang;
 
     this.posterZoom = clamp(this.posterZoom * ratio, 1, 6);
     this.posterPan.x -= dx * unitsPerPxX;
     this.posterPan.y += dy * unitsPerPxY;
+    // Optional: twist to "turn" slightly on touch.
+    this.posterYaw = clamp(this.posterYaw + dAng * 0.65, -1.15, 1.15);
     this.applyPosterViewPose();
   }
 
@@ -732,7 +771,11 @@ export class WinterMysticExperience {
     this.posterPan.y = clamp(this.posterPan.y, -maxPanY, maxPanY);
 
     this.tmpTarget.copy(this.world.posterTarget).add(new Vector3(this.posterPan.x, this.posterPan.y, 0));
-    this.tmpCam.copy(this.tmpTarget).add(new Vector3(0, 0, dist));
+    this.tmpCam.set(0, 0, dist);
+    this.tmpCam.applyAxisAngle(this.tmpUp, this.posterYaw);
+    this.tmpSide.set(1, 0, 0).applyAxisAngle(this.tmpUp, this.posterYaw);
+    this.tmpCam.applyAxisAngle(this.tmpSide, this.posterPitch);
+    this.tmpCam.add(this.tmpTarget);
     this.camera.position.copy(this.tmpCam);
     this.camera.lookAt(this.tmpTarget);
     this.smoothLookTarget.copy(this.tmpTarget);

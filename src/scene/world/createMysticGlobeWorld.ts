@@ -157,7 +157,8 @@ export function createMysticGlobeWorld(opts: {
   const snow = createSnowPoints({
     count: isMobile ? 1100 : 2200,
     radius: 12.5,
-    height: 9.5
+    height: 9.5,
+    color: 0x4aa3ff
   });
   snow.points.position.set(orbitCenter.x, -1.8, orbitCenter.z);
   root.add(snow.points);
@@ -416,7 +417,8 @@ export function createMysticGlobeWorld(opts: {
   // Keep the plane from dipping fully down into the globe framing.
   const playerYMin = baseY - 0.55;
   // Allow extra headroom so you can fly high enough to "leave" the globe view.
-  const playerYMax = baseY + 3.1;
+  const playerYMax = baseY + 5.1;
+  const softCeilingY = baseY + 3.85;
 
   let flapKick = 0;
 
@@ -470,7 +472,7 @@ export function createMysticGlobeWorld(opts: {
   function flap() {
     if (state !== "playing") return;
     velY = Math.max(velY, 0);
-    velY = clamp(velY + 3.6, -8.0, 8.0);
+    velY = clamp(velY + 3.1, -8.0, 8.0);
     flapKick = 1;
   }
 
@@ -528,30 +530,37 @@ export function createMysticGlobeWorld(opts: {
       playElapsed += dt;
 
       // "Hold to flap": classic vertical motion.
-      const upAccel = 5.1;
-      const gravity = -7.2;
+      const upAccel = 4.7;
+      const gravity = -6.3;
       const accel = thrusting ? upAccel : gravity;
 
       velY = clamp(velY + accel * dt, -8.0, 8.0);
-      velY *= Math.pow(0.987, dt * 60);
+      velY *= Math.pow(0.985, dt * 60);
 
       y = y + velY * dt;
       if (y <= playerYMin) {
         y = playerYMin;
         velY = Math.max(0, velY);
       }
-      y = Math.min(y, playerYMax);
+      if (y >= softCeilingY) {
+        const ceilingT = clamp((y - softCeilingY) / Math.max(1e-6, playerYMax - softCeilingY), 0, 1);
+        velY += (-8.5 * ceilingT) * dt;
+      }
+      if (y >= playerYMax) {
+        y = playerYMax;
+        velY = Math.min(0, velY);
+      }
 
       flapKick = Math.max(0, flapKick - dt * 6.5);
 
       // If you climb high enough, fly away and reveal the invite.
-      const escapeY = baseY + 2.45;
+      const escapeY = baseY + 3.55;
       if (y >= escapeY) {
         escapeCharge += dt;
       } else {
         escapeCharge = Math.max(0, escapeCharge - dt * 2.2);
       }
-      if (escapeCharge >= 0.15) triggerEscape();
+      if (escapeCharge >= 0.18) triggerEscape();
 
       // Fail-safe: auto-finish into invite after a while.
       if (playElapsed >= 20) triggerGameOver();

@@ -2,6 +2,7 @@ import {
   AdditiveBlending,
   BufferGeometry,
   CanvasTexture,
+  type ColorRepresentation,
   Float32BufferAttribute,
   Points,
   PointsMaterial,
@@ -30,10 +31,16 @@ function createSnowSpriteTexture(): Texture {
   return new CanvasTexture(c);
 }
 
-export function createSnowPoints(opts: { count: number; radius: number; height: number }) {
+export function createSnowPoints(opts: {
+  count: number;
+  radius: number;
+  height: number;
+  color?: ColorRepresentation;
+}) {
   const baseCount = opts.count;
   const radius = opts.radius;
   const height = opts.height;
+  const color = opts.color ?? 0xbfd6ff;
 
   const positions = new Float32Array(baseCount * 3);
   const velocities = new Float32Array(baseCount);
@@ -64,7 +71,7 @@ export function createSnowPoints(opts: { count: number; radius: number; height: 
     opacity: 0.65,
     depthWrite: false,
     blending: AdditiveBlending,
-    color: 0xbfd6ff
+    color
   });
 
   const points = new Points(geo, mat);
