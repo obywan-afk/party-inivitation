@@ -1,5 +1,7 @@
 import {
   BoxGeometry,
+  CanvasTexture,
+  CircleGeometry,
   Color,
   DirectionalLight,
   FogExp2,
@@ -7,6 +9,7 @@ import {
   HemisphereLight,
   InstancedMesh,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   PlaneGeometry,
@@ -48,6 +51,10 @@ export function createWinterWorld(opts: {
 
   const shouldUsePostFX = !isMobile && (window.devicePixelRatio || 1) <= 2;
 
+  // Sky dome to prevent seeing "end of world".
+  const sky = createSkyDome();
+  root.add(sky);
+
   // Lighting: cold moon + warm lantern accents.
   const hemi = new HemisphereLight(0x6b7fa8, 0x020409, 0.22);
   root.add(hemi);
@@ -73,8 +80,8 @@ export function createWinterWorld(opts: {
   root.add(rim);
   root.add(rim.target);
 
-  // Ground / snow.
-  const groundGeo = new PlaneGeometry(28, 28, 1, 1);
+  // Ground / snow (large disk so edges stay hidden in fog).
+  const groundGeo = new CircleGeometry(80, isMobile ? 48 : 72);
   const groundMat = new MeshStandardMaterial({
     color: new Color(0xcdd7e5),
     roughness: 0.98,
@@ -218,8 +225,8 @@ export function createWinterWorld(opts: {
     root.add(light);
   }
 
-  // Forest ring (instanced low-poly trees).
-  const treeCount = isMobile ? 26 : 40;
+  // Forest ring (instanced low-poly trees). Push farther out so fog hides bounds.
+  const treeCount = isMobile ? 30 : 48;
   const trunkGeo = new BoxGeometry(0.18, 1.25, 0.18);
   const canopyGeo = new BoxGeometry(0.9, 1.1, 0.9);
   const trunkMat = new MeshStandardMaterial({
@@ -244,7 +251,7 @@ export function createWinterWorld(opts: {
   const dummy = new Object3D();
   for (let i = 0; i < treeCount; i++) {
     const a = (i / treeCount) * Math.PI * 2;
-    const r = 9.8 + (Math.sin(i * 1.7) * 0.6 + 0.6) * 1.4;
+    const r = 14.5 + (Math.sin(i * 1.7) * 0.6 + 0.6) * 3.0;
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
     const s = 0.9 + (i % 7) * 0.06;
@@ -266,7 +273,7 @@ export function createWinterWorld(opts: {
   // Snow particles (GPU-friendly Points).
   const snow = createSnowPoints({
     count: isMobile ? 1400 : 2400,
-    radius: 13.5,
+    radius: 18.0,
     height: 7.5
   });
   root.add(snow.points);
@@ -299,6 +306,9 @@ export function createWinterWorld(opts: {
     envTex.dispose();
     runeTexture.dispose();
     posterTexture.dispose();
+    (sky.material as MeshBasicMaterial).map?.dispose();
+    sky.geometry.dispose();
+    (sky.material as MeshBasicMaterial).dispose();
     groundGeo.dispose();
     groundMat.dispose();
     plinthGeo.dispose();
@@ -334,4 +344,61 @@ export function createWinterWorld(opts: {
     update,
     dispose
   };
+}
+
+function createSkyDome() {
+  const tex = createSkyTexture();
+  tex.colorSpace = SRGBColorSpace;
+  tex.needsUpdate = true;
+
+  const mat = new MeshBasicMaterial({
+    map: tex,
+    side: 1, // BackSide
+    fog: false
+  });
+  const geo = new SphereGeometry(70, 48, 28);
+  const dome = new Mesh(geo, mat);
+  dome.position.set(0, 0, 0);
+  return dome;
+}
+
+function createSkyTexture() {
+  const w = 1024;
+  const h = 512;
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("2D canvas unavailable.");
+
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, "#02040b");
+  g.addColorStop(0.35, "#050814");
+  g.addColorStop(0.7, "#070b12");
+  g.addColorStop(1, "#0a0f18");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+
+  // Subtle "moon haze" spot.
+  const rg = ctx.createRadialGradient(w * 0.72, h * 0.22, 10, w * 0.72, h * 0.22, h * 0.55);
+  rg.addColorStop(0, "rgba(166,215,255,0.16)");
+  rg.addColorStop(0.35, "rgba(166,215,255,0.06)");
+  rg.addColorStop(1, "rgba(166,215,255,0)");
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Very subtle stars/noise.
+  ctx.globalAlpha = 0.25;
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * w;
+    const y = Math.random() * (h * 0.55);
+    const r = Math.random() < 0.95 ? 1 : 1.6;
+    ctx.fillStyle = `rgba(255,255,255,${0.08 + Math.random() * 0.25})`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  return new CanvasTexture(c);
 }

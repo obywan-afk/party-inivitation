@@ -20,12 +20,12 @@ export class AmbientAudio {
 
     const gain = ctx.createGain();
     this.gain = gain;
-    gain.gain.value = this.muted ? 0 : 0.18;
+    gain.gain.value = this.muted ? 0 : 0.32;
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 1400;
-    filter.Q.value = 0.8;
+    filter.frequency.value = 2200;
+    filter.Q.value = 0.7;
     this.filter = filter;
 
     const buffer =
@@ -47,7 +47,7 @@ export class AmbientAudio {
 
   toggleMuted() {
     this.muted = !this.muted;
-    if (this.gain) this.gain.gain.value = this.muted ? 0 : 0.18;
+    if (this.gain) this.gain.gain.value = this.muted ? 0 : 0.32;
   }
 
   dispose() {
@@ -94,7 +94,7 @@ export class AmbientAudio {
         const bed = (s1 * 0.22 + s2 * 0.12) * lfo;
         const air = noise * 0.12;
 
-        data[i] = (bed + air) * 0.55;
+        data[i] = (bed + air) * 0.9;
       }
     }
 

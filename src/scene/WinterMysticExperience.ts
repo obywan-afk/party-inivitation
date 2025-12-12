@@ -129,6 +129,7 @@ export class WinterMysticExperience {
     this.world = world;
 
     this.buildIntroCurves(world);
+    this.applyIntroStartPose();
 
     this.perfScaler = new PerfScaler({
       minPixelRatio: 0.75,
@@ -325,6 +326,17 @@ export class WinterMysticExperience {
 
     this.introCamCurve = new CatmullRomCurve3(camPoints, false, "catmullrom", 0.48);
     this.introTargetCurve = new CatmullRomCurve3(targetPoints, false, "catmullrom", 0.52);
+  }
+
+  private applyIntroStartPose() {
+    if (!this.camera || !this.controls || !this.introCamCurve || !this.introTargetCurve) return;
+    this.introCamCurve.getPointAt(0, this.tmpCam);
+    this.introTargetCurve.getPointAt(0, this.tmpTarget);
+    this.camera.position.copy(this.tmpCam);
+    this.controls.target.copy(this.tmpTarget);
+    this.camera.fov = this.introFovFrom;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
   }
 }
 

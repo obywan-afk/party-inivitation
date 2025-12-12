@@ -41,16 +41,6 @@ body {
   pointer-events: none;
 }
 
-.ui {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 16px;
-  gap: 12px;
-}
-
 .topbar {
   position: absolute;
   top: 12px;
@@ -169,20 +159,42 @@ body {
   width: min(560px, calc(100vw - 32px));
 }
 
-.hint {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+.play-wrap {
+  display: grid;
+  place-items: center;
+  gap: 18px;
 }
 
-.kbd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
+.play {
+  pointer-events: auto;
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 215, 255, 0.35);
+  background: radial-gradient(circle at 40% 30%, rgba(166, 215, 255, 0.2), rgba(255, 255, 255, 0.02));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.92);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.play:active {
+  transform: translateY(1px);
+}
+
+.play-icon {
+  width: 0;
+  height: 0;
+  border-top: 12px solid transparent;
+  border-bottom: 12px solid transparent;
+  border-left: 18px solid rgba(255, 255, 255, 0.92);
+  margin-left: 4px;
+}
+
+.loading-text {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+  text-align: center;
 }
