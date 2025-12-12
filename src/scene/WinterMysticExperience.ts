@@ -15,7 +15,6 @@ import {
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 import { createMysticGlobeWorld } from "./world/createMysticGlobeWorld";
 import { createPosterTexture } from "./world/posterTexture";
@@ -558,9 +557,6 @@ export class WinterMysticExperience {
     // Keep post-FX minimal and optional (mobile-friendly).
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-
-    const bloom = new UnrealBloomPass(new Vector2(1, 1), 0.62, 0.9, 0.85);
-    composer.addPass(bloom);
 
     composer.addPass(createVignettePass());
     composer.addPass(new OutputPass());

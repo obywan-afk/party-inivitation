@@ -29,6 +29,7 @@ import {
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 import { clamp, lerp } from "../../util/math";
+import { createSnowPoints } from "./snow";
 
 export type MysticGlobeWorld = ReturnType<typeof createMysticGlobeWorld>;
 
@@ -152,6 +153,15 @@ export function createMysticGlobeWorld(opts: {
   cloudPivot.add(cloudRing);
   gameGroup.add(cloudPivot);
 
+  // Snow particles (GPU-friendly Points) to make it feel "winter".
+  const snow = createSnowPoints({
+    count: isMobile ? 1100 : 2200,
+    radius: 12.5,
+    height: 9.5
+  });
+  snow.points.position.set(orbitCenter.x, -1.8, orbitCenter.z);
+  root.add(snow.points);
+
   // Layout on the planet surface.
   const dummy = new Object3D();
   const up = new Vector3(0, 1, 0);
@@ -219,11 +229,14 @@ export function createMysticGlobeWorld(opts: {
   houses.windowInst.instanceMatrix.needsUpdate = true;
 
   for (let i = 0; i < cloudCount; i++) {
-    // Clouds sit above the horizon.
-    const theta = Math.random() * Math.PI * 2;
+    // Distribute clouds around the full planet so rotation never reveals an empty side.
+    const u = Math.random();
+    const v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const y = 2 * v - 1; // cos(phi) in [-1..1]
+    const sinPhi = Math.sqrt(Math.max(0, 1 - y * y));
     const r = 7.2 + Math.random() * 3.2;
-    const y = 2.2 + Math.random() * 3.2;
-    dummy.position.set(Math.cos(theta) * r, y, Math.sin(theta) * r);
+    dummy.position.set(r * sinPhi * Math.cos(theta), r * y, r * sinPhi * Math.sin(theta));
     dummy.rotation.set(Math.random() * 0.2, Math.random() * Math.PI * 2, Math.random() * 0.2);
     dummy.scale.setScalar(0.65 + Math.random() * 1.35);
     dummy.updateMatrix();
@@ -352,14 +365,14 @@ export function createMysticGlobeWorld(opts: {
     roughness: 0.5,
     metalness: 0.0,
     emissive: new Color(0x0a0b12),
-    emissiveIntensity: 0.35
+    emissiveIntensity: 0.0
   });
   const inviteBackMat = new MeshStandardMaterial({
     color: new Color(0x0b0d1e),
     roughness: 0.9,
     metalness: 0.0,
     emissive: new Color(0x05060f),
-    emissiveIntensity: 0.2,
+    emissiveIntensity: 0.0,
     side: DoubleSide
   });
 
@@ -384,9 +397,14 @@ export function createMysticGlobeWorld(opts: {
   let state: GameState = "idle";
   let playElapsed = 0;
   let gameOverElapsed = 0;
+  let escapeElapsed = 0;
+  let escapeCharge = 0;
+  let didEscape = false;
 
   const playerPos = new Vector3(0, 0, 0);
   const tmpV = new Vector3();
+  const escapeStart = new Vector3();
+  const escapeEnd = new Vector3();
 
   // 2D-ish motion: player moves only on Y; the world motion comes from rolling the planet.
   const playerX = 0;
@@ -410,6 +428,7 @@ export function createMysticGlobeWorld(opts: {
     const map = qualityLevel >= 0.75 ? 1024 : 512;
     key.shadow.mapSize.set(map, map);
     key.shadow.needsUpdate = true;
+    snow.setQuality(qualityLevel);
     const tCount = Math.floor(treeCount * clamp(0.72 + qualityLevel * 0.28, 0.72, 1));
     trees.trunkInst.count = tCount;
     trees.tier1Inst.count = tCount;
@@ -422,11 +441,18 @@ export function createMysticGlobeWorld(opts: {
     playElapsed = 0;
     gameOverElapsed = 0;
     flapKick = 0;
+    escapeElapsed = 0;
+    escapeCharge = 0;
+    didEscape = false;
     inviteGroup.visible = false;
     inviteGroup.position.copy(posterTarget);
     inviteGroup.rotation.set(0, 0, 0);
     inviteGroup.scale.setScalar(1);
     gameGroup.position.set(0, 0, 0);
+    for (const { mat, baseOpacity } of planeFadeMats) {
+      mat.transparent = baseOpacity < 1;
+      mat.opacity = baseOpacity;
+    }
     recenter();
   }
 
@@ -437,6 +463,7 @@ export function createMysticGlobeWorld(opts: {
   function recenter() {
     velY = 0;
     y = baseY;
+    escapeCharge = 0;
     syncPlayerPose(0);
   }
 
@@ -451,6 +478,21 @@ export function createMysticGlobeWorld(opts: {
     if (state !== "playing") return;
     state = "gameover";
     gameOverElapsed = 0;
+  }
+
+  function triggerEscape() {
+    if (state !== "playing") return;
+    state = "escape";
+    escapeElapsed = 0;
+    escapeCharge = 0;
+    didEscape = true;
+    playerPos.set(playerX, y, playerZ);
+    player.position.copy(playerPos);
+    escapeStart.copy(player.position);
+    escapeEnd
+      .copy(escapeStart)
+      .add(new Vector3(6.8, 5.2, -4.8))
+      .add(new Vector3((Math.random() - 0.5) * 1.4, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 1.2));
   }
 
   function syncPlayerPose(_dt: number) {
@@ -474,11 +516,13 @@ export function createMysticGlobeWorld(opts: {
     perfT = t;
     // Planet rotation (main motion).
     // Reference feel: roll the world around Z (like a wheel), while the bird moves up/down.
-    const targetRotSpeed = state === "gameover" ? 0.25 : 0.38;
+    const targetRotSpeed = state === "gameover" ? 0.25 : state === "escape" ? 0.2 : 0.38;
     planetGroup.rotation.z += dt * targetRotSpeed;
 
     // Clouds roll with the world (same axis & speed) for coherence.
     cloudPivot.rotation.z += dt * targetRotSpeed;
+
+    snow.update(dt, t);
 
     if (state === "playing") {
       playElapsed += dt;
@@ -500,21 +544,57 @@ export function createMysticGlobeWorld(opts: {
 
       flapKick = Math.max(0, flapKick - dt * 6.5);
 
+      // If you climb high enough, fly away and reveal the invite.
+      const escapeY = baseY + 2.45;
+      if (y >= escapeY) {
+        escapeCharge += dt;
+      } else {
+        escapeCharge = Math.max(0, escapeCharge - dt * 2.2);
+      }
+      if (escapeCharge >= 0.15) triggerEscape();
+
       // Fail-safe: auto-finish into invite after a while.
       if (playElapsed >= 20) triggerGameOver();
     }
 
-    if (state !== "gameover") syncPlayerPose(dt);
+    if (state === "playing") syncPlayerPose(dt);
+
+    if (state === "escape") {
+      escapeElapsed += dt;
+      const escapeDuration = 1.05;
+      const u = clamp(escapeElapsed / escapeDuration, 0, 1);
+      const eased = 1 - Math.pow(1 - u, 3);
+
+      player.position.lerpVectors(escapeStart, escapeEnd, eased);
+      player.rotation.set(0, 0, 0);
+      player.rotation.y = lerp(0.0, 0.55, eased);
+      player.rotation.z = lerp(-0.25, -1.05, eased);
+
+      const flex = Math.sin((t + escapeElapsed) * 16.0) * 0.08 + (1 - eased) * 0.14;
+      wingLeft.rotation.x = 0.08 + flex;
+      wingRight.rotation.x = -0.08 - flex;
+
+      const fade = clamp((u - 0.25) / 0.7, 0, 1);
+      for (const { mat, baseOpacity } of planeFadeMats) {
+        mat.transparent = true;
+        mat.opacity = lerp(baseOpacity, 0.0, fade);
+      }
+
+      if (u >= 1) {
+        state = "gameover";
+        gameOverElapsed = 0;
+      }
+    }
 
     if (state === "gameover") {
       gameOverElapsed += dt;
 
       // Phase 1: drop the world out of view.
-      const dropDuration = 0.95;
+      const dropDuration = didEscape ? 0.55 : 0.95;
       const dropT = clamp(gameOverElapsed / dropDuration, 0, 1);
       const dropEased = 1 - Math.pow(1 - dropT, 3);
-      gameGroup.position.y = lerp(0, -12.0, dropEased);
-      gameGroup.rotation.z = lerp(0, -0.08, dropEased);
+      gameGroup.position.y = lerp(0, didEscape ? -8.5 : -12.0, dropEased);
+      gameGroup.rotation.z = lerp(0, didEscape ? -0.05 : -0.08, dropEased);
 
       // Fade the bird so the reveal reads cleanly.
       const fade = clamp(dropT * 1.25, 0, 1);
@@ -532,7 +612,8 @@ export function createMysticGlobeWorld(opts: {
       const spinEased = 1 - Math.pow(1 - spinT, 3);
       const startPos = tmpV.copy(posterTarget).add(new Vector3(0, -0.3, -1.1));
       inviteGroup.position.lerpVectors(startPos, posterTarget, spinEased);
-      inviteGroup.rotation.y = lerp(Math.PI, 0.0, spinEased);
+      const spinStartY = didEscape ? Math.PI * 5 : Math.PI;
+      inviteGroup.rotation.y = lerp(spinStartY, 0.0, spinEased);
       inviteGroup.rotation.x = lerp(0.22, 0.0, spinEased);
       inviteGroup.rotation.z = Math.sin(spinEased * Math.PI) * 0.08;
       inviteGroup.scale.setScalar(lerp(0.92, 1.0, spinEased));
@@ -542,7 +623,8 @@ export function createMysticGlobeWorld(opts: {
     if (scene.fog instanceof FogExp2) scene.fog.density = lerp(0.018, 0.024, 0.5 + 0.5 * Math.sin(t * 0.12));
 
     // Propeller spin (faster while thrusting).
-    const propSpeed = lerp(14, 26, qualityLevel) * (thrusting ? 1.35 : 0.75);
+    const thrustNow = state === "playing" ? thrusting : state === "escape";
+    const propSpeed = lerp(14, 26, qualityLevel) * (thrustNow ? 1.35 : 0.75);
     propeller.rotation.x += dt * propSpeed;
 
     return state;
@@ -559,6 +641,7 @@ export function createMysticGlobeWorld(opts: {
     trees.dispose();
     houses.dispose();
     clouds.dispose();
+    snow.dispose();
 
     inviteGeo.dispose();
     inviteFrontMat.dispose();
