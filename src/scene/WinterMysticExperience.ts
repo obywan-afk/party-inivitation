@@ -13,6 +13,7 @@ import {
   WebGLRenderer
 } from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
@@ -23,9 +24,17 @@ import { PerfScaler } from "../util/PerfScaler";
 import { clamp, lerp } from "../util/math";
 
 type StatusHint = "quality-low" | "quality-high";
+type MusicPhase = "intro" | "countdown" | "play" | "outro" | "gameover";
+
+export type MusicController = {
+  setPhase(phase: MusicPhase): void;
+  setThrusting(thrusting: boolean): void;
+  frame(dt: number, t: number): void;
+};
 
 export class WinterMysticExperience {
   private readonly canvas: HTMLCanvasElement;
+  private readonly music: MusicController | null;
 
   private renderer: WebGLRenderer | null = null;
   private scene: Scene | null = null;
@@ -81,9 +90,12 @@ export class WinterMysticExperience {
 
   private onPerfHintCb: ((hint: StatusHint) => void) | null = null;
   private onCountdownCb: ((n: number | null) => void) | null = null;
+  private lastMusicPhase: MusicPhase | null = null;
+  private lastThrusting = false;
 
-  constructor(opts: { canvas: HTMLCanvasElement }) {
+  constructor(opts: { canvas: HTMLCanvasElement; music?: MusicController | null }) {
     this.canvas = opts.canvas;
+    this.music = opts.music ?? null;
   }
 
   onPerfHint(cb: (hint: StatusHint) => void) {
@@ -108,7 +120,8 @@ export class WinterMysticExperience {
     // Mobile-first: ensure pointer events keep flowing (no scroll/zoom hijack).
     this.canvas.style.touchAction = "none";
 
-    renderer.setClearColor(new Color(0x4a4fc4), 1);
+    // Keep the page's initial "rose" vibe consistent during rendering.
+    renderer.setClearColor(new Color(0xff849a), 1);
     renderer.outputColorSpace = SRGBColorSpace;
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
@@ -120,7 +133,7 @@ export class WinterMysticExperience {
 
     const scene = new Scene();
     scene.background = null;
-    scene.fog = new FogExp2(new Color(0x4a4fc4), 0.02);
+    scene.fog = new FogExp2(new Color(0xff849a), 0.02);
 
     // Camera framing tuned closer to the reference demo (more centered, less skew).
     const camera = new PerspectiveCamera(55, 1, 0.05, 80);
@@ -203,6 +216,9 @@ export class WinterMysticExperience {
     this.world.setThrusting(false);
     this.world.recenter();
     this.pointerNdc.set(0, 0);
+
+    this.setMusicPhase("intro");
+    this.setMusicThrusting(false);
 
     // Ensure we start from the sky pose even if something changed.
     this.applyIntroStartPose();
@@ -298,6 +314,7 @@ export class WinterMysticExperience {
     this.primaryPointerType = null;
     this.primaryPointerId = null;
     this.world?.setThrusting(false);
+    this.setMusicThrusting(false);
   };
   private onPointerMove = (e: PointerEvent) => {
     if (this.primaryPointerId != null && e.pointerId !== this.primaryPointerId) return;
@@ -334,6 +351,7 @@ export class WinterMysticExperience {
     const t = this.clock.elapsedTime;
 
     this.perfScaler?.frame(t);
+    this.music?.frame(dt, t);
 
     if (this.introActive) {
       this.introElapsed += dt;
@@ -364,6 +382,7 @@ export class WinterMysticExperience {
     }
 
     if (!this.introActive && this.countdownActive) {
+      this.setMusicPhase("countdown");
       this.countdownTime -= dt;
       const next = this.countdownTime > 0 ? Math.ceil(this.countdownTime) : null;
       if (next !== this.countdownShown) {
@@ -375,6 +394,7 @@ export class WinterMysticExperience {
         this.onCountdownCb?.(null);
         this.playActive = true;
         this.world.start();
+        this.setMusicPhase("play");
       }
     }
 
@@ -394,6 +414,7 @@ export class WinterMysticExperience {
       }
     }
     this.world.setThrusting(thrust);
+    this.setMusicThrusting(thrust);
 
     const state = this.world.update(dt, t);
     if (!this.gameOver && state === "gameover") {
@@ -401,6 +422,8 @@ export class WinterMysticExperience {
       this.outroActive = true;
       this.outroElapsed = 0;
       this.world.setThrusting(false);
+      this.setMusicThrusting(false);
+      this.setMusicPhase("outro");
     }
 
     if (this.outroActive) {
@@ -416,7 +439,10 @@ export class WinterMysticExperience {
       this.camera.updateProjectionMatrix();
       this.renderer.toneMappingExposure = lerp(this.introExposureTo, 1.12, eased);
 
-      if (u >= 1) this.outroActive = false;
+      if (u >= 1) {
+        this.outroActive = false;
+        this.setMusicPhase("gameover");
+      }
     } else if (this.gameOver) {
       // Hold the invite framing once the outro completes.
       this.camera.position.copy(this.outroCamPos);
@@ -468,6 +494,10 @@ export class WinterMysticExperience {
 
   private renderOnce() {
     if (!this.renderer || !this.scene || !this.camera) return;
+    if (this.composer) {
+      this.composer.render();
+      return;
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -487,6 +517,7 @@ export class WinterMysticExperience {
     composer.addPass(bloom);
 
     composer.addPass(createVignettePass());
+    composer.addPass(new OutputPass());
     return composer;
   }
 
@@ -549,6 +580,22 @@ export class WinterMysticExperience {
     this.countdownShown = null;
     this.world.recenter();
     this.world.setThrusting(false);
+    this.setMusicThrusting(false);
+    this.setMusicPhase("countdown");
+  }
+
+  private setMusicPhase(phase: MusicPhase) {
+    if (!this.music) return;
+    if (this.lastMusicPhase === phase) return;
+    this.lastMusicPhase = phase;
+    this.music.setPhase(phase);
+  }
+
+  private setMusicThrusting(thrusting: boolean) {
+    if (!this.music) return;
+    if (this.lastThrusting === thrusting) return;
+    this.lastThrusting = thrusting;
+    this.music.setThrusting(thrusting);
   }
 }
 

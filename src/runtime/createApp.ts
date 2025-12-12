@@ -8,13 +8,14 @@ export type AppHandle = {
 };
 
 export function createApp(opts: { canvas: HTMLCanvasElement; uiRoot: HTMLDivElement }): AppHandle {
-  const experience = new WinterMysticExperience({ canvas: opts.canvas });
   const audio = new AmbientAudio();
+  const experience = new WinterMysticExperience({ canvas: opts.canvas, music: audio });
 
   const ui = createOverlayUI({
     root: opts.uiRoot,
     onEnter: async () => {
       await audio.start();
+      audio.setPhase("intro");
       experience.begin();
     },
     onRecenter: () => experience.recenter(),

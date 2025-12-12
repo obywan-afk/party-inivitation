@@ -53,6 +53,8 @@ export async function createPosterTexture(
 function tryLoadPosterFromPublic(url: string): Promise<Texture | null> {
   return new Promise((resolve) => {
     const loader = new TextureLoader();
+    // Needed for WebGL textures loaded from another origin (e.g. Vercel Blob).
+    loader.setCrossOrigin("anonymous");
     loader.load(
       url,
       (tex: Texture) => resolve(tex),

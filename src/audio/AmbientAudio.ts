@@ -5,11 +5,31 @@ export class AmbientAudio {
   private readonly envUrl =
     (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_AMBIENT_URL ?? null;
   private ctx: AudioContext | null = null;
-  private gain: GainNode | null = null;
+  private masterGain: GainNode | null = null;
+  private sceneGain: GainNode | null = null;
   private compressor: DynamicsCompressorNode | null = null;
   private source: AudioBufferSourceNode | null = null;
   private filter: BiquadFilterNode | null = null;
+  private drive: GainNode | null = null;
+  private shaper: WaveShaperNode | null = null;
+  private delay: DelayNode | null = null;
+  private delayFeedback: GainNode | null = null;
+  private delayWet: GainNode | null = null;
+
+  private acidOsc: OscillatorNode | null = null;
+  private acidFilter: BiquadFilterNode | null = null;
+  private acidGain: GainNode | null = null;
+
   private baseGain = 0.4;
+  private isGenerated = false;
+
+  private phase: MusicPhase = "intro";
+  private thrusting = false;
+  private energy = 0;
+  private energyTarget = 0.25;
+  private nextStepTime = 0;
+  private stepIndex = 0;
+  private lastDriveCurveAmount = 0;
 
   async start() {
     if (this.ctx) {
@@ -20,10 +40,14 @@ export class AmbientAudio {
     const ctx = new AudioContext();
     this.ctx = ctx;
 
-    const gain = ctx.createGain();
-    this.gain = gain;
+    const masterGain = ctx.createGain();
+    this.masterGain = masterGain;
     this.baseGain = 0.4;
-    gain.gain.value = this.muted ? 0 : this.baseGain;
+    masterGain.gain.value = this.muted ? 0 : this.baseGain;
+
+    const sceneGain = ctx.createGain();
+    this.sceneGain = sceneGain;
+    sceneGain.gain.value = 1;
 
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -26;
@@ -40,6 +64,7 @@ export class AmbientAudio {
     this.filter = filter;
 
     const { buffer, kind } = await this.loadWithFallback(ctx);
+    this.isGenerated = kind === "generated";
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
@@ -48,23 +73,166 @@ export class AmbientAudio {
     // Make external/music files more transparent, keep generated slightly filtered.
     if (kind === "file") {
       this.baseGain = 0.26;
-      gain.gain.value = this.muted ? 0 : this.baseGain;
+      masterGain.gain.value = this.muted ? 0 : this.baseGain;
       filter.frequency.value = 16000;
       filter.Q.value = 0.6;
     }
 
-    src.connect(filter);
+    // Add some “warehouse” grit (only for the generated techno).
+    const drive = ctx.createGain();
+    this.drive = drive;
+    drive.gain.value = 1.0;
+
+    const shaper = ctx.createWaveShaper();
+    this.shaper = shaper;
+    shaper.curve = makeDriveCurve(1.35);
+    shaper.oversample = "4x";
+
+    if (this.isGenerated) {
+      src.connect(drive);
+      drive.connect(shaper);
+      shaper.connect(filter);
+    } else {
+      src.connect(filter);
+    }
+
     filter.connect(comp);
-    comp.connect(gain);
-    gain.connect(ctx.destination);
+    comp.connect(sceneGain);
+    sceneGain.connect(masterGain);
+    masterGain.connect(ctx.destination);
+
+    // Subtle feedback delay for space (more noticeable on outro).
+    const delay = ctx.createDelay(0.6);
+    this.delay = delay;
+    const delayFeedback = ctx.createGain();
+    this.delayFeedback = delayFeedback;
+    const delayWet = ctx.createGain();
+    this.delayWet = delayWet;
+    delayWet.gain.value = 0;
+    delayFeedback.gain.value = 0.22;
+    delay.delayTime.value = 0.17;
+    sceneGain.connect(delay);
+    delay.connect(delayFeedback);
+    delayFeedback.connect(delay);
+    delay.connect(delayWet);
+    delayWet.connect(masterGain);
+
+    // Occasional acid stabs (only for generated).
+    if (this.isGenerated) {
+      const acidOsc = ctx.createOscillator();
+      this.acidOsc = acidOsc;
+      acidOsc.type = "sawtooth";
+      acidOsc.frequency.value = 110;
+
+      const acidFilter = ctx.createBiquadFilter();
+      this.acidFilter = acidFilter;
+      acidFilter.type = "lowpass";
+      acidFilter.frequency.value = 700;
+      acidFilter.Q.value = 10;
+
+      const acidGain = ctx.createGain();
+      this.acidGain = acidGain;
+      acidGain.gain.value = 0.0001;
+
+      acidOsc.connect(acidFilter);
+      acidFilter.connect(acidGain);
+      // Mix into the same drive/distortion path so it glues to the track.
+      acidGain.connect(drive);
+    }
 
     await ctx.resume();
     src.start();
+    this.acidOsc?.start();
+
+    this.nextStepTime = ctx.currentTime + 0.05;
+    this.stepIndex = 0;
+    this.energy = 0;
+    this.setPhase(this.phase);
   }
 
   toggleMuted() {
     this.muted = !this.muted;
-    if (this.gain) this.gain.gain.value = this.muted ? 0 : this.baseGain;
+    if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : this.baseGain;
+  }
+
+  setPhase(phase: MusicPhase) {
+    this.phase = phase;
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    // Reset phrase when we “drop” into play.
+    if (phase === "play") {
+      this.nextStepTime = ctx.currentTime + 0.05;
+      this.stepIndex = 0;
+    }
+
+    // Targets tuned for a hard/fast warehouse feel.
+    switch (phase) {
+      case "intro":
+        this.energyTarget = 0.25;
+        break;
+      case "countdown":
+        this.energyTarget = 0.5;
+        break;
+      case "play":
+        this.energyTarget = 0.92;
+        break;
+      case "outro":
+        this.energyTarget = 0.55;
+        break;
+      case "gameover":
+        this.energyTarget = 0.35;
+        break;
+    }
+  }
+
+  setThrusting(thrusting: boolean) {
+    this.thrusting = thrusting;
+  }
+
+  frame(dt: number, _t: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    // Smooth energy to avoid zipper noise when we change phase/thrust.
+    const follow = 1 - Math.exp(-dt * 6.5);
+    this.energy += (this.energyTarget - this.energy) * follow;
+
+    const thrustBoost = this.thrusting ? 0.16 : 0;
+    const e = clamp01(this.energy + thrustBoost);
+    const now = ctx.currentTime;
+
+    // Filter: darker on intro, wide open at peak-time.
+    const cutoff = lerp(1100, 15500, Math.pow(e, 1.25));
+    this.filter?.frequency.setTargetAtTime(cutoff, now, 0.06);
+    this.filter?.Q.setTargetAtTime(0.7 + e * 0.6, now, 0.08);
+
+    // Distortion drive.
+    if (this.drive && this.shaper && this.isGenerated) {
+      this.drive.gain.setTargetAtTime(lerp(0.95, 2.05, e), now, 0.06);
+      const amount = lerp(1.15, 2.2, e);
+      if (Math.abs(amount - this.lastDriveCurveAmount) > 0.06) {
+        this.lastDriveCurveAmount = amount;
+        this.shaper.curve = makeDriveCurve(amount);
+      }
+    }
+
+    // Scene mix (doesn't affect mute).
+    const sceneLevel =
+      this.phase === "play" ? 1 : this.phase === "countdown" ? 0.72 : this.phase === "outro" ? 0.62 : 0.55;
+    this.sceneGain?.gain.setTargetAtTime(sceneLevel, now, 0.08);
+
+    // Delay: more “space” after gameover/outro.
+    const delayWetTarget =
+      (this.phase === "outro" || this.phase === "gameover" ? 0.06 : 0.02) * (0.35 + e * 0.65);
+    this.delayWet?.gain.setTargetAtTime(delayWetTarget, now, 0.12);
+    if (this.delay) {
+      // Slightly tempo-ish; keep subtle to avoid “echo techno”.
+      const base = 0.17;
+      this.delay.delayTime.setTargetAtTime(base + (this.thrusting ? 0.01 : 0), now, 0.12);
+    }
+
+    this.scheduleAcid(now, e);
   }
 
   dispose() {
@@ -73,24 +241,45 @@ export class AmbientAudio {
     } catch {
       // ignore
     }
+    try {
+      this.acidOsc?.stop();
+    } catch {
+      // ignore
+    }
     this.source?.disconnect();
     this.filter?.disconnect();
     this.compressor?.disconnect();
-    this.gain?.disconnect();
+    this.sceneGain?.disconnect();
+    this.delayWet?.disconnect();
+    this.delayFeedback?.disconnect();
+    this.delay?.disconnect();
+    this.shaper?.disconnect();
+    this.drive?.disconnect();
+    this.acidFilter?.disconnect();
+    this.acidGain?.disconnect();
+    this.masterGain?.disconnect();
     void this.ctx?.close();
     this.source = null;
     this.filter = null;
     this.compressor = null;
-    this.gain = null;
+    this.sceneGain = null;
+    this.delayWet = null;
+    this.delayFeedback = null;
+    this.delay = null;
+    this.shaper = null;
+    this.drive = null;
+    this.acidOsc = null;
+    this.acidFilter = null;
+    this.acidGain = null;
+    this.masterGain = null;
     this.ctx = null;
   }
 
-  private createAmbientBuffer(ctx: AudioContext, seconds: number) {
+  private createAmbientBuffer(ctx: AudioContext, bars: number) {
     const sr = ctx.sampleRate;
     // Tempo: keep steps sample-aligned for a tight loop.
-    const bpm = 132;
+    const bpm = 155;
     const stepsPerBar16 = 16;
-    const bars = Math.max(1, Math.round((seconds * bpm) / 240)); // ~4 bars for default seconds
     const step16Samples = Math.max(1, Math.round((sr * 60) / (bpm * 4)));
     const total16 = stepsPerBar16 * bars;
     const length = total16 * step16Samples;
@@ -146,7 +335,7 @@ export class AmbientAudio {
 
         // Kick on every beat.
         let kick = 0;
-        if (tBeat < 0.42) {
+        if (tBeat < spb * 0.62) {
           const env = Math.exp(-tBeat * 10.8);
           const clickEnv = Math.exp(-tBeat * 70);
           const fStart = 170;
@@ -159,13 +348,10 @@ export class AmbientAudio {
         }
 
         // Rumble tail (sub) derived from kick timing.
-        let rumble = 0;
-        if (tBeat < 0.9) {
-          const env = Math.exp(-tBeat * 3.0);
-          const sub = Math.sin(TAU * 46 * t) * env * 0.12;
-          rumbleLP += (sub - rumbleLP) * aRumbleLP;
-          rumble = rumbleLP;
-        }
+        const envR = Math.exp(-tBeat * 3.0);
+        const sub = Math.sin(TAU * 46 * t) * envR * 0.12;
+        rumbleLP += (sub - rumbleLP) * aRumbleLP;
+        const rumble = rumbleLP;
 
         // Snare/noise burst on beats 2 and 4.
         let sn = 0;
@@ -265,11 +451,76 @@ export class AmbientAudio {
       (this.envUrl ? await this.tryLoadAudioFile(ctx, this.envUrl) : null) ??
       (await this.tryLoadAudioFile(ctx, this.fileUrl));
     if (file) return { buffer: file, kind: "file" };
-    // Generate a short, sample-aligned loop.
-    return { buffer: this.createAmbientBuffer(ctx, 8.0), kind: "generated" };
+    // Generated hard-techno loop (bar-aligned).
+    return { buffer: this.createAmbientBuffer(ctx, 8), kind: "generated" };
+  }
+
+  private scheduleAcid(now: number, energy: number) {
+    if (!this.ctx || !this.acidOsc || !this.acidFilter || !this.acidGain) return;
+    if (!this.isGenerated) return;
+    if (this.phase !== "play") return;
+
+    const bpm = 155;
+    const step = 60 / bpm / 4; // 16ths
+    const lookahead = 0.16;
+
+    while (this.nextStepTime < now + lookahead) {
+      const idx = this.stepIndex % acidPatternSemitones.length;
+      const semi = acidPatternSemitones[idx];
+      if (semi != null) {
+        const t0 = this.nextStepTime;
+        const freq = 55 * Math.pow(2, semi / 12);
+
+        const amp = lerp(0.02, 0.07, energy) * (this.thrusting ? 1.25 : 1);
+        const cutoff = lerp(550, 2400, energy) + (this.thrusting ? 550 : 0);
+
+        this.acidOsc.frequency.setTargetAtTime(freq, t0, 0.004);
+        this.acidFilter.frequency.cancelScheduledValues(t0);
+        this.acidFilter.frequency.setValueAtTime(cutoff, t0);
+        this.acidFilter.frequency.setTargetAtTime(cutoff * 2.0, t0 + 0.01, 0.03);
+        this.acidFilter.Q.setTargetAtTime(lerp(7.5, 14.0, energy), t0, 0.05);
+
+        this.acidGain.gain.cancelScheduledValues(t0);
+        this.acidGain.gain.setValueAtTime(0.0001, t0);
+        this.acidGain.gain.linearRampToValueAtTime(amp, t0 + 0.01);
+        this.acidGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+      }
+
+      this.stepIndex++;
+      this.nextStepTime += step;
+    }
   }
 }
 
 function mod(x: number, m: number) {
   return ((x % m) + m) % m;
+}
+
+type MusicPhase = "intro" | "countdown" | "play" | "outro" | "gameover";
+
+const acidPatternSemitones: Array<number | null> = [
+  // 4 bars @ 16ths. Sparse “peak-time” stabs to avoid becoming melodic.
+  0, null, null, null, 12, null, 3, null, null, null, 5, null, 0, null, -2, null,
+  null, null, 0, null, 12, null, null, null, 3, null, null, null, 5, null, null, null,
+  0, null, null, null, 12, null, 3, null, null, null, 5, null, 0, null, -2, null,
+  null, null, null, null, 12, null, null, null, 3, null, null, null, 5, null, null, null
+];
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+function clamp01(x: number) {
+  return Math.max(0, Math.min(1, x));
+}
+
+function makeDriveCurve(amount: number) {
+  const n = 2048;
+  const curve = new Float32Array(n);
+  const k = Math.max(0.0001, amount);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(x * k);
+  }
+  return curve;
 }

@@ -55,7 +55,7 @@ export function createMysticGlobeWorld(opts: {
   pmrem.dispose();
 
   // Low‑poly planet framing (like the reference screenshot).
-  const skyColor = new Color(0x4a4fc4);
+  const skyColor = new Color(0xff849a);
   scene.background = skyColor;
   // Soft fog to blend edges without looking “misty”.
   scene.fog = new FogExp2(skyColor, 0.02);
@@ -135,17 +135,17 @@ export function createMysticGlobeWorld(opts: {
     houses.windowInst
   );
 
-  // Clouds: orbit around the planet in a *tilted* plane (like the demo sky ring).
-  // We use a pivot at the planet center so we can rotate them without touching per-instance matrices.
+  // Clouds: orbit around the planet in a *tilted* plane.
+  // Reference feel: we roll the whole world around Z, so the cloud pivot also rotates on Z.
+  // `cloudRing` keeps a slight tilt on X for depth.
   //
-  // Important: instance matrices below are authored in the coordinate space of `clouds.cloudInst`
-  // (which historically lived under `gameGroup` at origin). To preserve that while still rotating
-  // around `orbitCenter`, we offset the cloud container by -orbitCenter under a pivot at orbitCenter.
+  // Important: because clouds are authored with positions around the origin, we place them
+  // under a pivot that is ALSO at the origin (relative to the parent `gameGroup`). Since the
+  // planet itself is offset (planetCenter.y), we simply match that offset via cloudPivot.
   const cloudPivot = new Group();
   cloudPivot.position.copy(orbitCenter);
 
   const cloudRing = new Group();
-  cloudRing.position.copy(orbitCenter).multiplyScalar(-1);
   cloudRing.rotation.x = 0.35;
   cloudRing.add(clouds.cloudInst);
 
@@ -299,20 +299,26 @@ export function createMysticGlobeWorld(opts: {
   let gameOverElapsed = 0;
 
   const playerPos = new Vector3(0, 0, 0);
-  const orbitOffset = new Vector3();
   const tmpV = new Vector3();
-  let velPhi = 0;
-  const boundsPhi = 0.28;
+
+  // 2D-ish motion: player moves only on Y; the world motion comes from rolling the planet.
+  const playerX = 0;
+  const playerZ = 3.1;
+
+  let velY = 0;
+  const baseY = 0.9;
+  const boundsY = 0.85;
   let dangerT = 0;
 
-  let theta = 0;
-  let phi = 0.96;
-  const basePhi = 0.96;
+  // Keep existing y-range mapping so controls feel similar across devices.
   const orbitRadius = planetRadius + 2.35;
   const phiMin = 0.55;
   const phiMax = 1.25;
   const playerYMin = orbitCenter.y + orbitRadius * Math.cos(phiMax);
   const playerYMax = orbitCenter.y + orbitRadius * Math.cos(phiMin);
+
+  // Current y position.
+  let y = baseY;
 
   function setQualityLevel(level: number) {
     qualityLevel = clamp(level, 0.25, 1);
@@ -344,10 +350,9 @@ export function createMysticGlobeWorld(opts: {
   }
 
   function recenter() {
-    velPhi = 0;
+    velY = 0;
     dangerT = 0;
-    theta = 0;
-    phi = basePhi;
+    y = baseY;
     syncPlayerPose(0);
   }
 
@@ -358,22 +363,15 @@ export function createMysticGlobeWorld(opts: {
   }
 
   function syncPlayerPose(_dt: number) {
-    // Keep the player in the "front" hemisphere so the camera framing stays stable.
-    // Forward motion is conveyed by rotating the planet (globe spin), not by orbiting the player.
-    //
-    // NOTE: three's spherical coords use theta around Y; theta=PI/2 places the player on +Z,
-    // which matches our recenter camera position at +Z.
-    theta = Math.PI / 2;
-
-    orbitOffset.setFromSphericalCoords(orbitRadius, phi, theta);
-    playerPos.copy(orbitCenter).add(orbitOffset);
+    // 2D-ish: fixed depth; only vertical motion.
+    playerPos.set(playerX, y, playerZ);
     player.position.copy(playerPos);
 
-    // Bird model points along +X (head is +X), so yaw=0 faces screen-right like the demo.
+    // Bird model points along +X (head is +X), so yaw=0 faces screen-right.
     player.rotation.set(0, 0, 0);
 
-    // Tilt like flappy bird.
-    player.rotation.z = MathUtils.clamp(velPhi * 0.55, -0.65, 0.55);
+    // Tilt like flappy bird (up = tilt up, down = tilt down).
+    player.rotation.z = MathUtils.clamp(-velY * 0.18, -0.65, 0.55);
     birdWing.rotation.x = Math.sin(perfT * 10.5) * 0.22;
   }
 
@@ -382,29 +380,27 @@ export function createMysticGlobeWorld(opts: {
   function update(dt: number, t: number) {
     perfT = t;
     // Planet rotation (main motion).
-    // Rotate around Y to feel like the reference demo (sky/sea rotate around vertical axis).
+    // Reference feel: roll the world around Z (like a wheel), while the bird moves up/down.
     const targetRotSpeed = state === "gameover" ? 0.25 : 0.38;
-    planetGroup.rotation.y += dt * targetRotSpeed;
-    // Tiny secondary wobble.
-    planetGroup.rotation.z = Math.sin(t * 0.08) * 0.08;
+    planetGroup.rotation.z += dt * targetRotSpeed;
 
-    // Clouds orbit in their own tilted plane.
-    cloudPivot.rotation.y += dt * (targetRotSpeed * 0.75);
-    cloudRing.rotation.z = Math.sin(t * 0.12) * 0.12;
+    // Clouds roll with the world (same axis & speed) for coherence.
+    cloudPivot.rotation.z += dt * targetRotSpeed;
 
     if (state === "playing") {
       playElapsed += dt;
 
-      // "Hold to flap": adjust spherical phi (down is increasing phi).
-      const upAccel = 1.65;
-      const gravity = 1.9;
-      const accelPhi = thrusting ? -upAccel : gravity;
-      velPhi = clamp(velPhi + accelPhi * dt, -1.35, 1.35);
-      velPhi *= Math.pow(0.992, dt * 60);
-      phi = clamp(phi + velPhi * dt, phiMin, phiMax);
+      // "Hold to flap": classic vertical motion.
+      const upAccel = 4.2;
+      const gravity = -5.2;
+      const accel = thrusting ? upAccel : gravity;
+
+      velY = clamp(velY + accel * dt, -6.0, 6.0);
+      velY *= Math.pow(0.992, dt * 60);
+      y = clamp(y + velY * dt, playerYMin, playerYMax);
 
       // Soft lose condition: only fail if you're out of safe band for a moment.
-      const out = Math.abs(phi - basePhi) > boundsPhi;
+      const out = Math.abs(y - baseY) > boundsY;
       dangerT = out ? dangerT + dt : Math.max(0, dangerT - dt * 1.25);
       if (dangerT >= 0.85 || playElapsed >= 20) triggerGameOver();
     }
