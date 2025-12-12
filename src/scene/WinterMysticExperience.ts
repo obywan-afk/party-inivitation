@@ -69,6 +69,16 @@ export class WinterMysticExperience {
   private lastPointerType: string | null = null;
   private smoothLookTarget = new Vector3(0, 0.9, 0);
 
+  // Poster view (game over): pan + zoom the invite.
+  private posterPan = new Vector2(0, 0);
+  private posterZoom = 1;
+  private posterBaseDistance = 2;
+  private posterPointers = new Map<number, { x: number; y: number }>();
+  private posterGesture:
+    | { mode: "pan"; lastX: number; lastY: number }
+    | { mode: "pinch"; lastCx: number; lastCy: number; lastDist: number }
+    | null = null;
+
   // Mobile viewport stability (iOS Safari address-bar collapse/expand).
   private visualViewport: VisualViewport | null = null;
   private resizeRaf = 0;
@@ -85,7 +95,7 @@ export class WinterMysticExperience {
   private tmpRadial = new Vector3();
   private tmpSide = new Vector3();
   private tmpUp = new Vector3(0, 1, 0);
-  private outroCamPos = new Vector3(0, 2.15, 6.9);
+  private outroCamPos = new Vector3();
   private playLookTarget = new Vector3(0, 0.9, 0);
 
   private onPerfHintCb: ((hint: StatusHint) => void) | null = null;
@@ -189,6 +199,7 @@ export class WinterMysticExperience {
 
     this.canvas.addEventListener("pointerdown", this.onPointerDown, { passive: true });
     this.canvas.addEventListener("pointermove", this.onPointerMove, { passive: true });
+    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
     window.addEventListener("pointerup", this.onPointerUp, { passive: true });
     window.addEventListener("pointercancel", this.onPointerUp, { passive: true });
     window.addEventListener("blur", this.onBlur, { passive: true });
@@ -216,6 +227,8 @@ export class WinterMysticExperience {
     this.world.setThrusting(false);
     this.world.recenter();
     this.pointerNdc.set(0, 0);
+    this.resetPosterView();
+    this.resetPosterGesture();
 
     this.setMusicPhase("intro");
     this.setMusicThrusting(false);
@@ -241,9 +254,8 @@ export class WinterMysticExperience {
     this.introActive = false;
 
     if (this.gameOver) {
-      this.camera.position.copy(this.outroCamPos);
-      this.camera.lookAt(this.world.posterTarget);
-      this.smoothLookTarget.copy(this.world.posterTarget);
+      this.resetPosterView();
+      this.applyPosterViewPose();
       return;
     }
 
@@ -267,6 +279,7 @@ export class WinterMysticExperience {
 
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
+    this.canvas.removeEventListener("wheel", this.onWheel);
     window.removeEventListener("pointerup", this.onPointerUp);
     window.removeEventListener("pointercancel", this.onPointerUp);
     window.removeEventListener("blur", this.onBlur);
@@ -290,16 +303,30 @@ export class WinterMysticExperience {
     this.resizeRaf = requestAnimationFrame(() => this.resize());
   };
   private onPointerDown = (e: PointerEvent) => {
-    if (!this.running || !this.world || this.gameOver) return;
+    if (!this.running || !this.world) return;
+    if (this.gameOver) {
+      this.canvasRect = this.canvas.getBoundingClientRect();
+      this.posterPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.resetPosterGesture();
+      this.canvas.setPointerCapture(e.pointerId);
+      return;
+    }
     this.pressing = true;
     this.primaryPointerType = e.pointerType;
     this.primaryPointerId = e.pointerId;
     this.canvasRect = this.canvas.getBoundingClientRect();
     if (e.isPrimary) this.canvas.setPointerCapture(e.pointerId);
+    this.world.flap();
     this.onPointerMove(e);
   };
   private onPointerUp = (e: PointerEvent) => {
     if (!this.world) return;
+    if (this.posterPointers.has(e.pointerId)) {
+      this.posterPointers.delete(e.pointerId);
+      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+      this.resetPosterGesture();
+      return;
+    }
     if (this.primaryPointerId === e.pointerId && this.canvas.hasPointerCapture(e.pointerId)) {
       this.canvas.releasePointerCapture(e.pointerId);
     }
@@ -313,10 +340,17 @@ export class WinterMysticExperience {
     this.pressing = false;
     this.primaryPointerType = null;
     this.primaryPointerId = null;
+    this.posterPointers.clear();
+    this.resetPosterGesture();
     this.world?.setThrusting(false);
     this.setMusicThrusting(false);
   };
   private onPointerMove = (e: PointerEvent) => {
+    if (this.gameOver && this.posterPointers.has(e.pointerId)) {
+      this.posterPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.applyPosterGesture();
+      return;
+    }
     if (this.primaryPointerId != null && e.pointerId !== this.primaryPointerId) return;
     this.lastPointerType = e.pointerType;
     const rect = this.canvasRect ?? this.canvas.getBoundingClientRect();
@@ -325,6 +359,14 @@ export class WinterMysticExperience {
     const x01 = (e.clientX - rect.left) / rect.width;
     const y01 = (e.clientY - rect.top) / rect.height;
     this.pointerNdc.set(clamp(x01 * 2 - 1, -1, 1), clamp(1 - y01 * 2, -1, 1));
+  };
+
+  private onWheel = (e: WheelEvent) => {
+    if (!this.gameOver || this.outroActive || !this.camera || !this.world) return;
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.0012);
+    this.posterZoom = clamp(this.posterZoom * factor, 1, 6);
+    this.applyPosterViewPose();
   };
 
   private resize() {
@@ -341,6 +383,8 @@ export class WinterMysticExperience {
     this.renderer.setSize(width, height, false);
     this.composer?.setSize(width, height);
     this.canvasRect = rect;
+
+    if (this.gameOver) this.applyPosterViewPose();
   }
 
   private loop = () => {
@@ -421,9 +465,13 @@ export class WinterMysticExperience {
       this.gameOver = true;
       this.outroActive = true;
       this.outroElapsed = 0;
+      this.pressing = false;
+      this.primaryPointerType = null;
+      this.primaryPointerId = null;
       this.world.setThrusting(false);
       this.setMusicThrusting(false);
       this.setMusicPhase("outro");
+      this.resetPosterView();
     }
 
     if (this.outroActive) {
@@ -444,10 +492,8 @@ export class WinterMysticExperience {
         this.setMusicPhase("gameover");
       }
     } else if (this.gameOver) {
-      // Hold the invite framing once the outro completes.
-      this.camera.position.copy(this.outroCamPos);
-      this.camera.lookAt(this.world.posterTarget);
-      this.smoothLookTarget.copy(this.world.posterTarget);
+      // Hold the invite framing once the outro completes (with pan/zoom).
+      this.applyPosterViewPose();
     } else if (!this.introActive) {
       // Gameplay framing: follow the player so it stays centered.
       const follow = clamp(1 - Math.exp(-dt * 10.0), 0, 1);
@@ -582,6 +628,118 @@ export class WinterMysticExperience {
     this.world.setThrusting(false);
     this.setMusicThrusting(false);
     this.setMusicPhase("countdown");
+  }
+
+  private resetPosterView() {
+    this.posterPan.set(0, 0);
+    this.posterZoom = 1;
+    this.updatePosterBaseDistanceAndPose();
+  }
+
+  private resetPosterGesture() {
+    this.posterGesture = null;
+  }
+
+  private updatePosterBaseDistanceAndPose() {
+    if (!this.world) return;
+    // Fit the poster to ~90% viewport height at zoom=1.
+    const fovDeg = 46;
+    const fovRad = (fovDeg * Math.PI) / 180;
+    const fill = 0.9;
+    this.posterBaseDistance = (this.world.posterHeight / fill) / (2 * Math.tan(fovRad / 2));
+    this.outroCamPos.copy(this.world.posterTarget).add(new Vector3(0, 0, this.posterBaseDistance));
+  }
+
+  private applyPosterGesture() {
+    if (!this.camera || !this.world) return;
+    if (this.outroActive) return;
+    const rect = this.canvasRect ?? this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const pointers = [...this.posterPointers.values()];
+    if (pointers.length === 0) {
+      this.resetPosterGesture();
+      return;
+    }
+
+    const zoom = clamp(this.posterZoom, 1, 6);
+    const dist = this.posterBaseDistance / zoom;
+    const fovRad = (this.camera.fov * Math.PI) / 180;
+    const visibleH = 2 * dist * Math.tan(fovRad / 2);
+    const visibleW = visibleH * this.camera.aspect;
+    const unitsPerPxX = visibleW / rect.width;
+    const unitsPerPxY = visibleH / rect.height;
+
+    if (pointers.length === 1) {
+      const p = pointers[0];
+      if (!this.posterGesture || this.posterGesture.mode !== "pan") {
+        this.posterGesture = { mode: "pan", lastX: p.x, lastY: p.y };
+        return;
+      }
+      const dx = p.x - this.posterGesture.lastX;
+      const dy = p.y - this.posterGesture.lastY;
+      this.posterGesture.lastX = p.x;
+      this.posterGesture.lastY = p.y;
+
+      this.posterPan.x -= dx * unitsPerPxX;
+      this.posterPan.y += dy * unitsPerPxY;
+      this.applyPosterViewPose();
+      return;
+    }
+
+    // Use the first 2 pointers for pinch/zoom.
+    const a = pointers[0];
+    const b = pointers[1];
+    const cx = (a.x + b.x) * 0.5;
+    const cy = (a.y + b.y) * 0.5;
+    const d = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    if (!this.posterGesture || this.posterGesture.mode !== "pinch") {
+      this.posterGesture = { mode: "pinch", lastCx: cx, lastCy: cy, lastDist: d };
+      return;
+    }
+
+    const dx = cx - this.posterGesture.lastCx;
+    const dy = cy - this.posterGesture.lastCy;
+    const ratio = d / this.posterGesture.lastDist;
+    this.posterGesture.lastCx = cx;
+    this.posterGesture.lastCy = cy;
+    this.posterGesture.lastDist = d;
+
+    this.posterZoom = clamp(this.posterZoom * ratio, 1, 6);
+    this.posterPan.x -= dx * unitsPerPxX;
+    this.posterPan.y += dy * unitsPerPxY;
+    this.applyPosterViewPose();
+  }
+
+  private applyPosterViewPose() {
+    if (!this.camera || !this.world) return;
+    if (Math.abs(this.camera.fov - 46) > 1e-3) {
+      this.camera.fov = 46;
+      this.camera.updateProjectionMatrix();
+    }
+    this.updatePosterBaseDistanceAndPose();
+
+    const zoom = clamp(this.posterZoom, 1, 6);
+    const dist = this.posterBaseDistance / zoom;
+
+    const fovRad = (this.camera.fov * Math.PI) / 180;
+    const visibleH = 2 * dist * Math.tan(fovRad / 2);
+    const visibleW = visibleH * this.camera.aspect;
+    const halfVisH = visibleH * 0.5;
+    const halfVisW = visibleW * 0.5;
+
+    const halfPosterH = this.world.posterHeight * 0.5;
+    const halfPosterW = this.world.posterWidth * 0.5;
+    const maxPanY = Math.max(0, halfPosterH - halfVisH);
+    const maxPanX = Math.max(0, halfPosterW - halfVisW);
+    this.posterPan.x = clamp(this.posterPan.x, -maxPanX, maxPanX);
+    this.posterPan.y = clamp(this.posterPan.y, -maxPanY, maxPanY);
+
+    this.tmpTarget.copy(this.world.posterTarget).add(new Vector3(this.posterPan.x, this.posterPan.y, 0));
+    this.tmpCam.copy(this.tmpTarget).add(new Vector3(0, 0, dist));
+    this.camera.position.copy(this.tmpCam);
+    this.camera.lookAt(this.tmpTarget);
+    this.smoothLookTarget.copy(this.tmpTarget);
   }
 
   private setMusicPhase(phase: MusicPhase) {

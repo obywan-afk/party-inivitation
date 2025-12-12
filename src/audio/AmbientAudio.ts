@@ -1,7 +1,8 @@
 export class AmbientAudio {
   muted = false;
 
-  private readonly fileUrl = "/ambient.mp3";
+  // Use an external URL if provided. Otherwise, fall back to generated audio.
+  // (We intentionally don't fetch a default file path to avoid noisy 404s in dev.)
   private readonly envUrl =
     (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_AMBIENT_URL ?? null;
   private ctx: AudioContext | null = null;
@@ -447,9 +448,7 @@ export class AmbientAudio {
   }
 
   private async loadWithFallback(ctx: AudioContext): Promise<{ buffer: AudioBuffer; kind: "file" | "generated" }> {
-    const file =
-      (this.envUrl ? await this.tryLoadAudioFile(ctx, this.envUrl) : null) ??
-      (await this.tryLoadAudioFile(ctx, this.fileUrl));
+    const file = this.envUrl ? await this.tryLoadAudioFile(ctx, this.envUrl) : null;
     if (file) return { buffer: file, kind: "file" };
     // Generated hard-techno loop (bar-aligned).
     return { buffer: this.createAmbientBuffer(ctx, 8), kind: "generated" };

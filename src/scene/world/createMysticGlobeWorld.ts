@@ -32,7 +32,7 @@ import { clamp, lerp } from "../../util/math";
 
 export type MysticGlobeWorld = ReturnType<typeof createMysticGlobeWorld>;
 
-type GameState = "idle" | "playing" | "gameover";
+type GameState = "idle" | "playing" | "escape" | "gameover";
 
 export function createMysticGlobeWorld(opts: {
   renderer: WebGLRenderer;
@@ -234,26 +234,113 @@ export function createMysticGlobeWorld(opts: {
   // Player.
   const player = new Group();
   gameGroup.add(player);
-  const birdBody = new Mesh(
-    new BoxGeometry(0.38, 0.22, 0.22),
-    new MeshLambertMaterial({ color: new Color(0xff6b5a) })
+  const plane = new Group();
+  player.add(plane);
+  plane.scale.setScalar(1.05);
+
+  const planeRadialSeg = isMobile ? 12 : 22;
+  const planeSmoothSeg = isMobile ? 14 : 26;
+
+  const fuselageMat = new MeshStandardMaterial({
+    color: new Color(0xff6b5a),
+    roughness: 0.48,
+    metalness: 0.12
+  });
+  const wingMat = new MeshStandardMaterial({
+    color: new Color(0xffffff),
+    roughness: 0.68,
+    metalness: 0.0
+  });
+  const accentMat = new MeshStandardMaterial({
+    color: new Color(0x19213a),
+    roughness: 0.42,
+    metalness: 0.18
+  });
+  const propMat = new MeshStandardMaterial({
+    color: new Color(0x2a2a2a),
+    roughness: 0.52,
+    metalness: 0.15
+  });
+  const glassMat = new MeshStandardMaterial({
+    color: new Color(0x7ad9ff),
+    roughness: 0.12,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.82
+  });
+
+  const planeFadeMats: Array<{ mat: MeshStandardMaterial; baseOpacity: number }> = [
+    { mat: fuselageMat, baseOpacity: 1 },
+    { mat: wingMat, baseOpacity: 1 },
+    { mat: accentMat, baseOpacity: 1 },
+    { mat: propMat, baseOpacity: 1 },
+    { mat: glassMat, baseOpacity: glassMat.opacity }
+  ];
+
+  const fuselage = new Mesh(
+    new CylinderGeometry(0.105, 0.125, 0.54, planeRadialSeg, 1, false),
+    fuselageMat
   );
-  birdBody.castShadow = true;
-  player.add(birdBody);
-  const birdHead = new Mesh(
-    new BoxGeometry(0.18, 0.16, 0.16),
-    new MeshLambertMaterial({ color: new Color(0xffffff) })
-  );
-  birdHead.position.set(0.26, 0.02, 0);
-  birdHead.castShadow = true;
-  player.add(birdHead);
-  const birdWing = new Mesh(
-    new BoxGeometry(0.18, 0.06, 0.42),
-    new MeshLambertMaterial({ color: new Color(0xff8a7d) })
-  );
-  birdWing.position.set(-0.02, -0.02, 0);
-  birdWing.castShadow = true;
-  player.add(birdWing);
+  fuselage.rotation.z = -Math.PI / 2;
+  fuselage.castShadow = true;
+  plane.add(fuselage);
+
+  const nose = new Mesh(new ConeGeometry(0.125, 0.16, planeRadialSeg, 1, false), fuselageMat);
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.set(0.35, 0, 0);
+  nose.castShadow = true;
+  plane.add(nose);
+
+  const tail = new Mesh(new ConeGeometry(0.11, 0.14, planeRadialSeg, 1, false), fuselageMat);
+  tail.rotation.z = Math.PI / 2;
+  tail.position.set(-0.34, 0, 0);
+  tail.castShadow = true;
+  plane.add(tail);
+
+  const cockpit = new Mesh(new SphereGeometry(0.105, planeSmoothSeg, planeSmoothSeg), glassMat);
+  cockpit.position.set(0.05, 0.085, 0);
+  cockpit.scale.set(1, 0.85, 0.95);
+  cockpit.castShadow = true;
+  plane.add(cockpit);
+
+  const wingLeft = new Mesh(new BoxGeometry(0.22, 0.03, 0.56), wingMat);
+  wingLeft.position.set(-0.02, -0.02, -0.31);
+  wingLeft.rotation.x = 0.08;
+  wingLeft.castShadow = true;
+  plane.add(wingLeft);
+
+  const wingRight = new Mesh(new BoxGeometry(0.22, 0.03, 0.56), wingMat);
+  wingRight.position.set(-0.02, -0.02, 0.31);
+  wingRight.rotation.x = -0.08;
+  wingRight.castShadow = true;
+  plane.add(wingRight);
+
+  const tailWing = new Mesh(new BoxGeometry(0.12, 0.02, 0.34), wingMat);
+  tailWing.position.set(-0.34, 0.03, 0);
+  tailWing.castShadow = true;
+  plane.add(tailWing);
+
+  const fin = new Mesh(new BoxGeometry(0.1, 0.14, 0.02), accentMat);
+  fin.position.set(-0.37, 0.1, 0);
+  fin.castShadow = true;
+  plane.add(fin);
+
+  const propeller = new Group();
+  propeller.position.set(0.44, 0, 0);
+  plane.add(propeller);
+
+  const hub = new Mesh(new CylinderGeometry(0.035, 0.035, 0.065, planeRadialSeg, 1, false), propMat);
+  hub.rotation.z = -Math.PI / 2;
+  hub.castShadow = true;
+  propeller.add(hub);
+
+  const bladeZ = new Mesh(new BoxGeometry(0.01, 0.05, 0.5), propMat);
+  bladeZ.castShadow = true;
+  propeller.add(bladeZ);
+
+  const bladeY = new Mesh(new BoxGeometry(0.01, 0.5, 0.05), propMat);
+  bladeY.castShadow = true;
+  propeller.add(bladeY);
 
   // Invitation card (revealed after the world drops).
   // A4 portrait plane: width/height = 210/297 ≈ 0.707.
@@ -303,19 +390,17 @@ export function createMysticGlobeWorld(opts: {
 
   // 2D-ish motion: player moves only on Y; the world motion comes from rolling the planet.
   const playerX = 0;
-  const playerZ = 3.1;
+  // Keep the player visually "above" the globe: sit further out from the planet.
+  const playerZ = planetRadius + 1.6;
 
   let velY = 0;
-  const baseY = 0.9;
-  const boundsY = 0.85;
-  let dangerT = 0;
+  const baseY = 1.25;
+  // Keep the plane from dipping fully down into the globe framing.
+  const playerYMin = baseY - 0.55;
+  // Allow extra headroom so you can fly high enough to "leave" the globe view.
+  const playerYMax = baseY + 3.1;
 
-  // Keep existing y-range mapping so controls feel similar across devices.
-  const orbitRadius = planetRadius + 2.35;
-  const phiMin = 0.55;
-  const phiMax = 1.25;
-  const playerYMin = orbitCenter.y + orbitRadius * Math.cos(phiMax);
-  const playerYMax = orbitCenter.y + orbitRadius * Math.cos(phiMin);
+  let flapKick = 0;
 
   // Current y position.
   let y = baseY;
@@ -336,7 +421,7 @@ export function createMysticGlobeWorld(opts: {
     state = "playing";
     playElapsed = 0;
     gameOverElapsed = 0;
-    dangerT = 0;
+    flapKick = 0;
     inviteGroup.visible = false;
     inviteGroup.position.copy(posterTarget);
     inviteGroup.rotation.set(0, 0, 0);
@@ -351,9 +436,15 @@ export function createMysticGlobeWorld(opts: {
 
   function recenter() {
     velY = 0;
-    dangerT = 0;
     y = baseY;
     syncPlayerPose(0);
+  }
+
+  function flap() {
+    if (state !== "playing") return;
+    velY = Math.max(velY, 0);
+    velY = clamp(velY + 3.6, -8.0, 8.0);
+    flapKick = 1;
   }
 
   function triggerGameOver() {
@@ -367,12 +458,14 @@ export function createMysticGlobeWorld(opts: {
     playerPos.set(playerX, y, playerZ);
     player.position.copy(playerPos);
 
-    // Bird model points along +X (head is +X), so yaw=0 faces screen-right.
+    // Player model points along +X, so yaw=0 faces screen-right.
     player.rotation.set(0, 0, 0);
 
     // Tilt like flappy bird (up = tilt up, down = tilt down).
-    player.rotation.z = MathUtils.clamp(-velY * 0.18, -0.65, 0.55);
-    birdWing.rotation.x = Math.sin(perfT * 10.5) * 0.22;
+    player.rotation.z = MathUtils.clamp(-velY * 0.18, -0.65, 0.55) - flapKick * 0.22;
+    const flex = Math.sin(perfT * 10.5) * 0.06 + flapKick * 0.18;
+    wingLeft.rotation.x = 0.08 + flex;
+    wingRight.rotation.x = -0.08 - flex;
   }
 
   let perfT = 0;
@@ -391,18 +484,24 @@ export function createMysticGlobeWorld(opts: {
       playElapsed += dt;
 
       // "Hold to flap": classic vertical motion.
-      const upAccel = 4.2;
-      const gravity = -5.2;
+      const upAccel = 5.1;
+      const gravity = -7.2;
       const accel = thrusting ? upAccel : gravity;
 
-      velY = clamp(velY + accel * dt, -6.0, 6.0);
-      velY *= Math.pow(0.992, dt * 60);
-      y = clamp(y + velY * dt, playerYMin, playerYMax);
+      velY = clamp(velY + accel * dt, -8.0, 8.0);
+      velY *= Math.pow(0.987, dt * 60);
 
-      // Soft lose condition: only fail if you're out of safe band for a moment.
-      const out = Math.abs(y - baseY) > boundsY;
-      dangerT = out ? dangerT + dt : Math.max(0, dangerT - dt * 1.25);
-      if (dangerT >= 0.85 || playElapsed >= 20) triggerGameOver();
+      y = y + velY * dt;
+      if (y <= playerYMin) {
+        y = playerYMin;
+        velY = Math.max(0, velY);
+      }
+      y = Math.min(y, playerYMax);
+
+      flapKick = Math.max(0, flapKick - dt * 6.5);
+
+      // Fail-safe: auto-finish into invite after a while.
+      if (playElapsed >= 20) triggerGameOver();
     }
 
     if (state !== "gameover") syncPlayerPose(dt);
@@ -419,12 +518,10 @@ export function createMysticGlobeWorld(opts: {
 
       // Fade the bird so the reveal reads cleanly.
       const fade = clamp(dropT * 1.25, 0, 1);
-      (birdBody.material as MeshLambertMaterial).transparent = true;
-      (birdHead.material as MeshLambertMaterial).transparent = true;
-      (birdWing.material as MeshLambertMaterial).transparent = true;
-      (birdBody.material as MeshLambertMaterial).opacity = lerp(1, 0.0, fade);
-      (birdHead.material as MeshLambertMaterial).opacity = lerp(1, 0.0, fade);
-      (birdWing.material as MeshLambertMaterial).opacity = lerp(1, 0.0, fade);
+      for (const { mat, baseOpacity } of planeFadeMats) {
+        mat.transparent = true;
+        mat.opacity = lerp(baseOpacity, 0.0, fade);
+      }
 
       // Phase 2: flip-spin the card into view (back -> front).
       const revealDelay = 0.05;
@@ -443,6 +540,10 @@ export function createMysticGlobeWorld(opts: {
 
     // Slight sky haze drift.
     if (scene.fog instanceof FogExp2) scene.fog.density = lerp(0.018, 0.024, 0.5 + 0.5 * Math.sin(t * 0.12));
+
+    // Propeller spin (faster while thrusting).
+    const propSpeed = lerp(14, 26, qualityLevel) * (thrusting ? 1.35 : 0.75);
+    propeller.rotation.x += dt * propSpeed;
 
     return state;
   }
@@ -463,12 +564,23 @@ export function createMysticGlobeWorld(opts: {
     inviteFrontMat.dispose();
     inviteBackMat.dispose();
 
-    birdBody.geometry.dispose();
-    (birdBody.material as MeshLambertMaterial).dispose();
-    birdHead.geometry.dispose();
-    (birdHead.material as MeshLambertMaterial).dispose();
-    birdWing.geometry.dispose();
-    (birdWing.material as MeshLambertMaterial).dispose();
+    fuselage.geometry.dispose();
+    nose.geometry.dispose();
+    tail.geometry.dispose();
+    cockpit.geometry.dispose();
+    wingLeft.geometry.dispose();
+    wingRight.geometry.dispose();
+    tailWing.geometry.dispose();
+    fin.geometry.dispose();
+    hub.geometry.dispose();
+    bladeZ.geometry.dispose();
+    bladeY.geometry.dispose();
+
+    fuselageMat.dispose();
+    wingMat.dispose();
+    accentMat.dispose();
+    propMat.dispose();
+    glassMat.dispose();
 
     root.removeFromParent();
   }
@@ -478,6 +590,8 @@ export function createMysticGlobeWorld(opts: {
   return {
     orbitCenter,
     posterTarget,
+    posterWidth: a4Width,
+    posterHeight: a4Height,
     recenterCameraPos,
     playerYMin,
     playerYMax,
@@ -485,6 +599,7 @@ export function createMysticGlobeWorld(opts: {
     setQualityLevel,
     start,
     setThrusting,
+    flap,
     recenter,
     triggerGameOver,
     getPlayerPosition: (out: Vector3) => out.copy(player.position),
@@ -623,15 +738,13 @@ function createPlanetTexture() {
 }
 
 function randomPointOnPlanet(radius: number, jitter: number) {
-  // Biased toward the “top” hemisphere so the visible area looks populated.
+  // Uniform over the full sphere so rotation never reveals an “empty” half.
+  // (Previous implementation forced y>=0 which populated only one hemisphere.)
   const u = Math.random();
   const v = Math.random();
   const theta = 2 * Math.PI * u;
-  const phi = Math.acos(clamp(lerp(0.2, 1, v) * 2 - 1, -1, 1));
+  const y = 2 * v - 1; // cos(phi) in [-1..1]
+  const sinPhi = Math.sqrt(Math.max(0, 1 - y * y));
   const r = radius + (Math.random() * 2 - 1) * jitter;
-  return new Vector3(
-    r * Math.sin(phi) * Math.cos(theta),
-    Math.abs(r * Math.cos(phi)),
-    r * Math.sin(phi) * Math.sin(theta)
-  );
+  return new Vector3(r * sinPhi * Math.cos(theta), r * y, r * sinPhi * Math.sin(theta));
 }
