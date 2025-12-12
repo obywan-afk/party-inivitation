@@ -83,30 +83,85 @@ export class AmbientAudio {
     const length = Math.floor(sr * seconds);
     const buffer = ctx.createBuffer(2, length, sr);
 
-    // A low, cinematic bed: two detuned sines + soft noise, with slow amplitude motion.
+    // Generate a "wind + shimmer" ambience (no constant low hum).
+    const TAU = Math.PI * 2;
+    const fade = Math.max(1, Math.floor(sr * 0.06));
+
     for (let ch = 0; ch < 2; ch++) {
       const data = buffer.getChannelData(ch);
 
-      let noise = 0;
+      // One-pole filters (simple, fast, stable).
+      const lpCut = 1200;
+      const hpCut = 120;
+      const aLP = 1 - Math.exp((-TAU * lpCut) / sr);
+      const aHP = 1 - Math.exp((-TAU * hpCut) / sr);
+
+      // Precompute shimmer events.
+      const eventCount = 12;
+      const events: Array<{
+        start: number;
+        dur: number;
+        freq: number;
+        phase: number;
+        rate: number;
+        amp: number;
+      }> = [];
+      for (let e = 0; e < eventCount; e++) {
+        const start = Math.random() * (seconds - 0.8);
+        const dur = 0.35 + Math.random() * 0.9;
+        const freq = 320 + Math.random() * 720;
+        const phase = Math.random() * TAU;
+        const rate = 3.5 + Math.random() * 3.5;
+        const amp = 0.03 + Math.random() * 0.05;
+        events.push({ start, dur, freq, phase, rate, amp });
+      }
+
+      let brown = 0;
+      let lp = 0;
+      let hpLp = 0;
+
       for (let i = 0; i < length; i++) {
         const t = i / sr;
 
-        const f1 = 55.0 * (1 + 0.002 * Math.sin(t * 0.4));
-        const f2 = 110.0 * (1 + 0.002 * Math.cos(t * 0.33));
-        const detune = ch === 0 ? -0.12 : 0.09;
-
-        const s1 = Math.sin((t * (f1 + detune)) * Math.PI * 2);
-        const s2 = Math.sin((t * (f2 - detune)) * Math.PI * 2);
-
-        // Brown-ish noise (leaky integrator).
+        // Brown-ish noise (wind base).
         const white = Math.random() * 2 - 1;
-        noise = (noise + 0.02 * white) * 0.985;
+        brown = (brown + 0.02 * white) * 0.985;
 
-        const lfo = 0.65 + 0.35 * Math.sin(t * 0.18 + ch * 0.9);
-        const bed = (s1 * 0.22 + s2 * 0.12) * lfo;
-        const air = noise * 0.12;
+        // Highpass to remove rumble/DC (prevents "engine" hum).
+        hpLp += (brown - hpLp) * aHP;
+        let wind = brown - hpLp;
 
-        data[i] = (bed + air) * 0.9;
+        // Soften with lowpass.
+        lp += (wind - lp) * aLP;
+        wind = lp;
+
+        // Slow breathing motion.
+        const lfo = 0.55 + 0.45 * Math.sin(TAU * (0.045 + ch * 0.006) * t + ch * 1.1);
+        let out = wind * (0.32 * lfo);
+
+        // Distant shimmer / icy sparkle.
+        let shimmer = 0;
+        for (let e = 0; e < events.length; e++) {
+          const ev = events[e];
+          const dt = t - ev.start;
+          if (dt < 0 || dt > ev.dur) continue;
+          const u = dt / ev.dur;
+          const win = Math.sin(Math.PI * u); // smooth in/out
+          const vib = 1 + 0.004 * Math.sin(TAU * ev.rate * t + ev.phase);
+          const s = Math.sin(TAU * (ev.freq * vib) * t + ev.phase);
+          shimmer += s * win * win * ev.amp;
+        }
+        out += shimmer;
+
+        // Clamp to avoid harshness before compression.
+        data[i] = Math.max(-0.95, Math.min(0.95, out));
+      }
+
+      // Equal-power fade to avoid loop clicks.
+      for (let i = 0; i < fade; i++) {
+        const g = Math.sin((i / fade) * (Math.PI / 2));
+        data[i] *= g;
+        data[length - 1 - i] *= g;
       }
     }
 
