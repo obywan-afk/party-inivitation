@@ -96,6 +96,7 @@ export class WinterMysticExperience {
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
     controls.enablePan = false;
+    controls.enabled = false; // prevent pre-play interaction + clamping during intro setup
     controls.minDistance = 3.1;
     controls.maxDistance = 9.5;
     controls.minPolarAngle = 0.35;
@@ -146,8 +147,7 @@ export class WinterMysticExperience {
     window.addEventListener("resize", this.onResize, { passive: true });
     window.addEventListener("orientationchange", this.onResize, { passive: true });
 
-    controls.target.copy(world.posterTarget);
-    controls.update();
+    // Do not call controls.update() here; it would clamp the sky-start down to maxDistance.
 
     onProgress(1);
     this.renderOnce();
@@ -160,6 +160,9 @@ export class WinterMysticExperience {
     this.running = true;
     this.introActive = true;
     this.introElapsed = 0;
+
+    // Ensure we start from the sky pose even if something changed.
+    this.applyIntroStartPose();
 
     // Start wide + slightly brighter, then settle.
     this.camera.fov = this.introFovFrom;
@@ -249,6 +252,7 @@ export class WinterMysticExperience {
 
         this.camera.position.copy(this.tmpCam);
         this.controls.target.copy(this.tmpTarget);
+        this.camera.lookAt(this.tmpTarget);
       }
 
       this.camera.fov = lerp(this.introFovFrom, this.introFovTo, eased);
@@ -260,10 +264,17 @@ export class WinterMysticExperience {
         this.renderer.toneMappingExposure = this.introExposureTo;
         this.camera.fov = this.introFovTo;
         this.camera.updateProjectionMatrix();
+
+        // Hand-off to controls at the intended final framing.
+        this.controls.target.copy(this.world.posterTarget);
+        this.controls.enabled = true;
+        this.controls.update();
       }
     }
 
-    this.controls.update();
+    if (!this.introActive) {
+      this.controls.update();
+    }
     this.world.update(dt, t);
 
     if (this.composer) {
@@ -336,7 +347,7 @@ export class WinterMysticExperience {
     this.controls.target.copy(this.tmpTarget);
     this.camera.fov = this.introFovFrom;
     this.camera.updateProjectionMatrix();
-    this.controls.update();
+    this.camera.lookAt(this.tmpTarget);
   }
 }
 

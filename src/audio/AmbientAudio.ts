@@ -6,6 +6,7 @@ export class AmbientAudio {
     (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_AMBIENT_URL ?? null;
   private ctx: AudioContext | null = null;
   private gain: GainNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
   private source: AudioBufferSourceNode | null = null;
   private filter: BiquadFilterNode | null = null;
 
@@ -20,7 +21,15 @@ export class AmbientAudio {
 
     const gain = ctx.createGain();
     this.gain = gain;
-    gain.gain.value = this.muted ? 0 : 0.32;
+    gain.gain.value = this.muted ? 0 : 0.4;
+
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -26;
+    comp.knee.value = 18;
+    comp.ratio.value = 3.5;
+    comp.attack.value = 0.01;
+    comp.release.value = 0.22;
+    this.compressor = comp;
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
@@ -28,17 +37,18 @@ export class AmbientAudio {
     filter.Q.value = 0.7;
     this.filter = filter;
 
-    const buffer =
-      (this.envUrl ? await this.tryLoadAudioFile(ctx, this.envUrl) : null) ??
-      (await this.tryLoadAudioFile(ctx, this.fileUrl)) ??
-      this.createAmbientBuffer(ctx, 6.0);
+    const { buffer, kind } = await this.loadWithFallback(ctx);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
     this.source = src;
 
+    // Slightly lower gain for external/music files.
+    if (kind === "file") gain.gain.value = this.muted ? 0 : 0.26;
+
     src.connect(filter);
-    filter.connect(gain);
+    filter.connect(comp);
+    comp.connect(gain);
     gain.connect(ctx.destination);
 
     await ctx.resume();
@@ -47,7 +57,7 @@ export class AmbientAudio {
 
   toggleMuted() {
     this.muted = !this.muted;
-    if (this.gain) this.gain.gain.value = this.muted ? 0 : 0.32;
+    if (this.gain) this.gain.gain.value = this.muted ? 0 : 0.4;
   }
 
   dispose() {
@@ -58,10 +68,12 @@ export class AmbientAudio {
     }
     this.source?.disconnect();
     this.filter?.disconnect();
+    this.compressor?.disconnect();
     this.gain?.disconnect();
     void this.ctx?.close();
     this.source = null;
     this.filter = null;
+    this.compressor = null;
     this.gain = null;
     this.ctx = null;
   }
@@ -110,5 +122,13 @@ export class AmbientAudio {
     } catch {
       return null;
     }
+  }
+
+  private async loadWithFallback(ctx: AudioContext): Promise<{ buffer: AudioBuffer; kind: "file" | "generated" }> {
+    const file =
+      (this.envUrl ? await this.tryLoadAudioFile(ctx, this.envUrl) : null) ??
+      (await this.tryLoadAudioFile(ctx, this.fileUrl));
+    if (file) return { buffer: file, kind: "file" };
+    return { buffer: this.createAmbientBuffer(ctx, 6.0), kind: "generated" };
   }
 }
