@@ -8,9 +8,10 @@ import {
 } from "three";
 import { clamp } from "../../util/math";
 
-const POSTER_URL = "/poster.png";
-const ENV_POSTER_URL = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-  ?.VITE_POSTER_URL;
+const ENV = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+const BASE_URL = (ENV?.BASE_URL ?? "/").replace(/\/?$/, "/");
+const POSTER_URL = `${BASE_URL}poster.png`;
+const ENV_POSTER_URL = ENV?.VITE_POSTER_URL;
 
 export async function createPosterTexture(
   renderer: WebGLRenderer,

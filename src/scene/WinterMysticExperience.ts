@@ -122,8 +122,9 @@ export class WinterMysticExperience {
     scene.background = null;
     scene.fog = new FogExp2(new Color(0x4a4fc4), 0.02);
 
-    const camera = new PerspectiveCamera(50, 1, 0.05, 80);
-    camera.position.set(7.2, 4.6, 8.8);
+    // Camera framing tuned closer to the reference demo (more centered, less skew).
+    const camera = new PerspectiveCamera(55, 1, 0.05, 80);
+    camera.position.set(0.0, 2.8, 9.4);
     scene.add(camera);
 
     const posterTexture = await createPosterTexture(renderer, onProgress);
