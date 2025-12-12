@@ -33,7 +33,7 @@ export class AmbientAudio {
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 2200;
+    filter.frequency.value = 5200;
     filter.Q.value = 0.7;
     this.filter = filter;
 
@@ -43,8 +43,12 @@ export class AmbientAudio {
     src.loop = true;
     this.source = src;
 
-    // Slightly lower gain for external/music files.
-    if (kind === "file") gain.gain.value = this.muted ? 0 : 0.26;
+    // Make external/music files more transparent, keep generated slightly filtered.
+    if (kind === "file") {
+      gain.gain.value = this.muted ? 0 : 0.26;
+      filter.frequency.value = 16000;
+      filter.Q.value = 0.6;
+    }
 
     src.connect(filter);
     filter.connect(comp);
@@ -83,9 +87,21 @@ export class AmbientAudio {
     const length = Math.floor(sr * seconds);
     const buffer = ctx.createBuffer(2, length, sr);
 
-    // Generate a "wind + shimmer" ambience (no constant low hum).
+    // Generated "rolling techno" (kick + hats + bass) with wind/shimmer bed.
     const TAU = Math.PI * 2;
-    const fade = Math.max(1, Math.floor(sr * 0.06));
+    const seam = Math.max(1, Math.floor(sr * 0.05));
+    const bpm = 120;
+    const spb = 60 / bpm; // seconds per beat
+    const step16 = spb / 4;
+    const step8 = spb / 2;
+    const bar = spb * 4;
+
+    const bassPatternHz = [
+      55.0, 55.0, 65.41, 55.0, 73.42, 55.0, 82.41, 73.42,
+      55.0, 65.41, 55.0, 73.42, 55.0, 82.41, 73.42, 65.41,
+      55.0, 55.0, 65.41, 55.0, 73.42, 55.0, 82.41, 73.42,
+      55.0, 65.41, 55.0, 98.0, 82.41, 73.42, 65.41, 55.0
+    ];
 
     for (let ch = 0; ch < 2; ch++) {
       const data = buffer.getChannelData(ch);
@@ -120,6 +136,16 @@ export class AmbientAudio {
       let lp = 0;
       let hpLp = 0;
 
+      // Hat highpass.
+      let hatHpLp = 0;
+      const hatHpCut = 6500;
+      const aHatHP = 1 - Math.exp((-TAU * hatHpCut) / sr);
+
+      // Bass oscillator.
+      let bassPhase = ch === 0 ? 0.13 : 0.37;
+      let bassFreq = bassPatternHz[0];
+      let lastBassStep = -1;
+
       for (let i = 0; i < length; i++) {
         const t = i / sr;
 
@@ -137,7 +163,7 @@ export class AmbientAudio {
 
         // Slow breathing motion.
         const lfo = 0.55 + 0.45 * Math.sin(TAU * (0.045 + ch * 0.006) * t + ch * 1.1);
-        let out = wind * (0.32 * lfo);
+        let out = wind * (0.24 * lfo);
 
         // Distant shimmer / icy sparkle.
         let shimmer = 0;
@@ -151,17 +177,82 @@ export class AmbientAudio {
           const s = Math.sin(TAU * (ev.freq * vib) * t + ev.phase);
           shimmer += s * win * win * ev.amp;
         }
-        out += shimmer;
+        out += shimmer * 0.8;
+
+        // --- Techno layer ---
+        const tBeat = t % spb; // time since last beat
+        const tBar = t % bar;
+
+        // Kick on every beat.
+        let kick = 0;
+        if (tBeat < 0.28) {
+          const env = Math.exp(-tBeat * 13.5);
+          const fStart = 150;
+          const fEnd = 46;
+          const k = 18;
+          const phase = TAU * (((fStart - fEnd) * (1 - Math.exp(-k * tBeat))) / k + fEnd * tBeat);
+          kick = Math.tanh(Math.sin(phase) * env * 3.0) * 0.42;
+        }
+
+        // Clap/noise burst on beats 2 and 4 (t=spb, 3*spb in each bar).
+        let clap = 0;
+        const dtC2 = mod(tBar - spb, bar);
+        const dtC4 = mod(tBar - spb * 3, bar);
+        const dtC = Math.min(dtC2, dtC4);
+        if (dtC < 0.12) {
+          const env = Math.exp(-dtC * 32);
+          // Simple "bandpass-ish" by subtracting a lowpassed noise.
+          const n = Math.random() * 2 - 1;
+          hatHpLp += (n - hatHpLp) * (1 - Math.exp((-TAU * 1800) / sr));
+          const bp = n - hatHpLp;
+          clap = Math.tanh(bp * 1.6) * env * 0.12;
+        }
+
+        // 16th hats (bright, rolling).
+        let hat = 0;
+        const dt16 = t % step16;
+        if (dt16 < 0.03) {
+          const env = Math.exp(-dt16 * 110);
+          const n = Math.random() * 2 - 1;
+          // Highpass to get "tss".
+          hatHpLp += (n - hatHpLp) * aHatHP;
+          const hp = n - hatHpLp;
+          // Accents on off-16ths.
+          const step = Math.floor(t / step16) % 16;
+          const accent = step % 4 === 2 ? 1.35 : 1.0;
+          hat = Math.tanh(hp * 2.2) * env * 0.065 * accent;
+        }
+
+        // Rolling bass on 8ths.
+        const bassStep = Math.floor(t / step8);
+        if (bassStep !== lastBassStep) {
+          lastBassStep = bassStep;
+          bassFreq = bassPatternHz[bassStep % bassPatternHz.length];
+        }
+        const dtBass = t % step8;
+        const bassEnv = Math.exp(-dtBass * 10.5);
+        bassPhase = (bassPhase + bassFreq / sr) % 1;
+        const saw = bassPhase * 2 - 1;
+        const bass = Math.tanh(saw * 1.6) * bassEnv * 0.11;
+
+        // Stereo width: tiny phase offset on hats/shimmer.
+        const pan = ch === 0 ? -1 : 1;
+        out += kick + clap + bass + hat * (0.9 + 0.1 * pan);
 
         // Clamp to avoid harshness before compression.
         data[i] = Math.max(-0.95, Math.min(0.95, out));
       }
 
-      // Equal-power fade to avoid loop clicks.
-      for (let i = 0; i < fade; i++) {
-        const g = Math.sin((i / fade) * (Math.PI / 2));
-        data[i] *= g;
-        data[length - 1 - i] *= g;
+      // Seamless loop: equal-power crossfade the first/last region.
+      for (let i = 0; i < seam; i++) {
+        const a = i / Math.max(1, seam - 1);
+        const wIn = Math.sin(a * (Math.PI / 2));
+        const wOut = Math.cos(a * (Math.PI / 2));
+        const s0 = data[i];
+        const s1 = data[length - seam + i];
+        const m = s0 * wIn + s1 * wOut;
+        data[i] = m;
+        data[length - seam + i] = m;
       }
     }
 
@@ -184,6 +275,11 @@ export class AmbientAudio {
       (this.envUrl ? await this.tryLoadAudioFile(ctx, this.envUrl) : null) ??
       (await this.tryLoadAudioFile(ctx, this.fileUrl));
     if (file) return { buffer: file, kind: "file" };
-    return { buffer: this.createAmbientBuffer(ctx, 6.0), kind: "generated" };
+    // 8s @ 120bpm = clean 4-bar loop.
+    return { buffer: this.createAmbientBuffer(ctx, 8.0), kind: "generated" };
   }
+}
+
+function mod(x: number, m: number) {
+  return ((x % m) + m) % m;
 }
