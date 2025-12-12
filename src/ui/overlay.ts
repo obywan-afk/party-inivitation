@@ -5,6 +5,7 @@ export type OverlayUI = {
   setStatus(status: OverlayStatus, errorMessage?: string): void;
   setProgress(p: number): void;
   setPerfHint(hint: PerfHint): void;
+  setCountdown(n: number | null): void;
   dispose(): void;
 };
 
@@ -13,7 +14,6 @@ export function createOverlayUI(opts: {
   onEnter: () => void | Promise<void>;
   onRecenter: () => void;
   onMuteToggle: () => void;
-  onSkipIntro: () => void;
   getMuted: () => boolean;
 }): OverlayUI {
   const root = opts.root;
@@ -25,37 +25,6 @@ export function createOverlayUI(opts: {
   const overlayInner = document.createElement("div");
   overlayInner.className = "overlay-inner";
   overlay.appendChild(overlayInner);
-
-  const hero = document.createElement("div");
-  hero.className = "hero";
-  overlayInner.appendChild(hero);
-
-  const brand = document.createElement("div");
-  brand.className = "brand";
-  hero.appendChild(brand);
-
-  const sigil = document.createElement("div");
-  sigil.className = "sigil";
-  sigil.setAttribute("aria-hidden", "true");
-  brand.appendChild(sigil);
-
-  const brandCopy = document.createElement("div");
-  brandCopy.className = "brand-copy";
-  brand.appendChild(brandCopy);
-
-  const brandTitle = document.createElement("div");
-  brandTitle.className = "brand-title";
-  brandTitle.textContent = "Winter Mystic Invite";
-  brandCopy.appendChild(brandTitle);
-
-  const brandSub = document.createElement("div");
-  brandSub.className = "brand-sub";
-  brandSub.textContent = "A cinematic winter shrine • A4 poster invite";
-  brandCopy.appendChild(brandSub);
-
-  const playWrap = document.createElement("div");
-  playWrap.className = "play-wrap panel";
-  hero.appendChild(playWrap);
 
   const enterBtn = document.createElement("button");
   enterBtn.className = "play";
@@ -70,29 +39,7 @@ export function createOverlayUI(opts: {
       <div class="play-icon"></div>
     </div>
   `;
-  playWrap.appendChild(enterBtn);
-
-  const ctaLabel = document.createElement("div");
-  ctaLabel.className = "cta-label";
-  ctaLabel.textContent = "Loading…";
-  playWrap.appendChild(ctaLabel);
-
-  const loadingText = document.createElement("div");
-  loadingText.className = "loading-text";
-  loadingText.textContent = "Loading…";
-  playWrap.appendChild(loadingText);
-
-  const progressWrap = document.createElement("div");
-  progressWrap.className = "progress";
-  playWrap.appendChild(progressWrap);
-
-  const progressBar = document.createElement("div");
-  progressWrap.appendChild(progressBar);
-
-  const helperText = document.createElement("div");
-  helperText.className = "helper-text";
-  helperText.textContent = "1-finger orbit • pinch to zoom • recenter anytime";
-  playWrap.appendChild(helperText);
+  overlayInner.appendChild(enterBtn);
 
   // ---- Topbar (in-experience HUD controls) ----
   const topbar = document.createElement("div");
@@ -113,12 +60,6 @@ export function createOverlayUI(opts: {
   right.style.pointerEvents = "auto";
   topbar.appendChild(right);
 
-  const skipBtn = document.createElement("button");
-  skipBtn.className = "button ghost";
-  skipBtn.type = "button";
-  skipBtn.textContent = "Skip intro";
-  right.appendChild(skipBtn);
-
   const muteBtn = document.createElement("button");
   muteBtn.className = "button";
   muteBtn.type = "button";
@@ -131,19 +72,16 @@ export function createOverlayUI(opts: {
   recenterBtn.textContent = "Recenter";
   right.appendChild(recenterBtn);
 
-  const hudHint = document.createElement("div");
-  hudHint.className = "hud-hint";
-  hudHint.setAttribute("aria-hidden", "true");
-  hudHint.textContent = "Tip: Keep the poster centered — tap Recenter if you drift.";
+  const countdown = document.createElement("div");
+  countdown.className = "countdown";
+  countdown.style.display = "none";
 
   root.appendChild(topbar);
-  root.appendChild(hudHint);
+  root.appendChild(countdown);
   root.appendChild(overlay);
 
   let status: OverlayStatus = "loading";
   let disposed = false;
-  let introTimeout = 0;
-  let hintTimeout = 0;
 
   const ringBar = enterBtn.querySelector<SVGCircleElement>(".play-ring-bar");
   const ringRadius = 52;
@@ -159,8 +97,6 @@ export function createOverlayUI(opts: {
 
   function setProgress(p: number) {
     const clamped = Math.max(0, Math.min(1, p));
-    progressBar.style.width = `${Math.round(clamped * 100)}%`;
-    loadingText.textContent = `Loading… ${Math.round(clamped * 100)}%`;
     if (ringBar) {
       ringBar.style.strokeDashoffset = `${ringCircumference * (1 - clamped)}`;
     }
@@ -182,20 +118,25 @@ export function createOverlayUI(opts: {
     }
   }
 
+  function setCountdown(n: number | null) {
+    if (n == null) {
+      countdown.style.display = "none";
+      countdown.textContent = "";
+      return;
+    }
+    countdown.textContent = String(n);
+    countdown.style.display = "grid";
+    countdown.classList.remove("pop");
+    // force reflow so the animation retriggers
+    void countdown.offsetWidth;
+    countdown.classList.add("pop");
+  }
+
   async function enter() {
     if (status !== "ready") return;
     setStatus("running");
     refreshMuteLabel();
     await opts.onEnter();
-    window.clearTimeout(introTimeout);
-    window.clearTimeout(hintTimeout);
-
-    // Offer a brief "skip intro" affordance, then get out of the way.
-    skipBtn.classList.remove("is-hidden");
-    introTimeout = window.setTimeout(() => skipBtn.classList.add("is-hidden"), 8200);
-
-    hudHint.classList.add("show");
-    hintTimeout = window.setTimeout(() => hudHint.classList.remove("show"), 6800);
   }
 
   function setStatus(next: OverlayStatus, errorMessage?: string) {
@@ -205,13 +146,12 @@ export function createOverlayUI(opts: {
       overlay.style.opacity = "1";
       overlay.style.pointerEvents = "auto";
       topbar.style.display = "none";
-      ctaLabel.textContent = "Loading…";
-      loadingText.textContent = "Loading…";
       enterBtn.disabled = true;
       enterBtn.classList.remove("is-ready");
+      enterBtn.setAttribute("aria-label", "Loading");
+      enterBtn.title = "Loading…";
       muteBtn.style.display = "none";
       recenterBtn.style.display = "none";
-      skipBtn.style.display = "none";
       return;
     }
 
@@ -220,13 +160,12 @@ export function createOverlayUI(opts: {
       overlay.style.opacity = "1";
       overlay.style.pointerEvents = "auto";
       topbar.style.display = "none";
-      ctaLabel.textContent = "Tap to Begin";
-      loadingText.textContent = "Audio starts after tap (autoplay rules).";
       enterBtn.disabled = false;
       enterBtn.classList.add("is-ready");
+      enterBtn.setAttribute("aria-label", "Tap to begin");
+      enterBtn.title = "Tap to begin";
       muteBtn.style.display = "none";
       recenterBtn.style.display = "none";
-      skipBtn.style.display = "none";
       return;
     }
 
@@ -234,7 +173,6 @@ export function createOverlayUI(opts: {
       overlay.style.opacity = "0";
       overlay.style.pointerEvents = "none";
       topbar.style.display = "flex";
-      skipBtn.style.display = "inline-flex";
       muteBtn.style.display = "inline-flex";
       recenterBtn.style.display = "inline-flex";
       refreshMuteLabel();
@@ -248,22 +186,16 @@ export function createOverlayUI(opts: {
     overlay.style.opacity = "1";
     overlay.style.pointerEvents = "auto";
     topbar.style.display = "none";
-    ctaLabel.textContent = "Unavailable";
-    loadingText.textContent = errorMessage ? `Error: ${errorMessage}` : "Something went wrong.";
     enterBtn.disabled = true;
     enterBtn.setAttribute("aria-label", "Unavailable");
+    enterBtn.title = errorMessage ? `Error: ${errorMessage}` : "Something went wrong.";
     enterBtn.classList.remove("is-ready");
     muteBtn.style.display = "none";
     recenterBtn.style.display = "none";
-    skipBtn.style.display = "none";
   }
 
   enterBtn.addEventListener("click", () => {
     void enter();
-  });
-  skipBtn.addEventListener("click", () => {
-    opts.onSkipIntro();
-    skipBtn.classList.add("is-hidden");
   });
   muteBtn.addEventListener("click", () => {
     opts.onMuteToggle();
@@ -289,13 +221,11 @@ export function createOverlayUI(opts: {
   function dispose() {
     if (disposed) return;
     disposed = true;
-    window.clearTimeout(introTimeout);
-    window.clearTimeout(hintTimeout);
     window.removeEventListener("keydown", onKeydown);
     overlay.remove();
     topbar.remove();
-    hudHint.remove();
+    countdown.remove();
   }
 
-  return { setStatus, setProgress, setPerfHint, dispose };
+  return { setStatus, setProgress, setPerfHint, setCountdown, dispose };
 }

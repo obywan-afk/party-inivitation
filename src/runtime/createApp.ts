@@ -19,7 +19,6 @@ export function createApp(opts: { canvas: HTMLCanvasElement; uiRoot: HTMLDivElem
     },
     onRecenter: () => experience.recenter(),
     onMuteToggle: () => audio.toggleMuted(),
-    onSkipIntro: () => experience.skipIntro(),
     getMuted: () => audio.muted
   });
 
@@ -36,6 +35,7 @@ export function createApp(opts: { canvas: HTMLCanvasElement; uiRoot: HTMLDivElem
       ui.setStatus("ready");
 
       experience.onPerfHint((hint) => ui.setPerfHint(hint));
+      experience.onCountdown((n) => ui.setCountdown(n));
     } catch (err) {
       ui.setStatus("error", err instanceof Error ? err.message : String(err));
       throw err;
@@ -52,4 +52,3 @@ export function createApp(opts: { canvas: HTMLCanvasElement; uiRoot: HTMLDivElem
 
   return { start, dispose };
 }
-

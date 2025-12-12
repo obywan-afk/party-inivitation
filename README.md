@@ -1,6 +1,6 @@
-# Winter Mystic 3D Party Invite (Mobile‑First)
+# Mystic Globe Invite Game (Mobile‑First)
 
-Moody, cinematic winter 3D world (Three.js) with an A4 invite “poster” integrated as a stone tablet. Mobile‑first touch controls, bounded navigation, recenter, cinematic intro (skippable), and ambient audio that starts only after a user gesture.
+Pop‑color, cozy “mystic globe” WebGL experience (Three.js). Tap/hold to float up, release to drift down. After a short play session (or if you drift out of bounds) the A4 invite rises into view as a poster reveal. Ambient audio starts only after a user gesture.
 
 ## Tech
 
@@ -27,11 +27,10 @@ Deploy the `dist/` folder to any static host (Netlify / Vercel static / Cloudfla
 
 ## Controls (Mobile‑First)
 
-- 1‑finger drag: orbit/rotate around the invite
-- Pinch: zoom
-- `Recenter`: returns you to the intended framing
-
-Navigation is constrained (distance + angles) so the poster remains the focal point.
+- Tap/hold: rise
+- Release: fall
+- `Recenter`: resets you to the start position
+- `Mute`: toggles audio
 
 ## Replace the A4 Poster
 
@@ -74,11 +73,11 @@ If the poster/audio must be visible/audible to visitors, it can’t be truly “
 - Auto quality scaling adjusts device pixel ratio based on measured FPS (`src/util/PerfScaler.ts`).
 - Post‑FX is minimal and auto-disabled on mobile by default (`src/scene/WinterMysticExperience.ts`). Toggle via URL: `?postfx=0` (off) / `?postfx=1` (on).
 - Shadows are tuned for mobile (shadow map size adapts with quality).
-- Snow uses a conservative GPU-friendly `Points` system with quality LOD (`src/scene/world/snow.ts`).
 
 ## Project Structure
 
-- `src/scene/WinterMysticExperience.ts` — renderer, camera, controls, intro, render loop
-- `src/scene/world/*` — scene construction (winter world, poster texture, runes, snow, vignette)
-- `src/ui/overlay.ts` — loading/enter UI, recenter, mute, skip intro
+- `src/scene/WinterMysticExperience.ts` — renderer, camera, intro, flappy input, render loop
+- `src/scene/world/createMysticGlobeWorld.ts` — rotating globe world + player + invite reveal
+- `src/scene/world/posterTexture.ts` — loads `public/poster.png` or generates a placeholder invite texture
+- `src/ui/overlay.ts` — play button + in-game topbar
 - `src/audio/AmbientAudio.ts` — autoplay-safe ambient audio (file or generated)
