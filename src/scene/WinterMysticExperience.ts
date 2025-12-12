@@ -32,6 +32,7 @@ type StatusHint = "quality-low" | "quality-high";
 type MusicPhase = "intro" | "countdown" | "play" | "outro" | "gameover";
 
 export type MusicController = {
+  start(): Promise<void>;
   setPhase(phase: MusicPhase): void;
   setThrusting(thrusting: boolean): void;
   frame(dt: number, t: number): void;
@@ -77,6 +78,7 @@ export class WinterMysticExperience {
   private primaryPointerId: number | null = null;
   private lastPointerType: string | null = null;
   private smoothLookTarget = new Vector3(0, 0.9, 0);
+  private audioPrimed = false;
 
   // Poster view (game over): pan + zoom the invite.
   private posterPan = new Vector2(0, 0);
@@ -118,6 +120,12 @@ export class WinterMysticExperience {
   constructor(opts: { canvas: HTMLCanvasElement; music?: MusicController | null }) {
     this.canvas = opts.canvas;
     this.music = opts.music ?? null;
+  }
+
+  private ensureMusicStarted() {
+    if (this.audioPrimed) return;
+    this.audioPrimed = true;
+    void this.music?.start();
   }
 
   onPerfHint(cb: (hint: StatusHint) => void) {
@@ -337,6 +345,7 @@ export class WinterMysticExperience {
   };
   private onPointerDown = (e: PointerEvent) => {
     if (!this.running || !this.world) return;
+    this.ensureMusicStarted();
     if (this.gameOver) {
       if (this.outroActive) return;
       this.canvasRect = this.canvas.getBoundingClientRect();

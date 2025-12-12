@@ -27,6 +27,8 @@ export class AmbientAudio {
   private hookPanner: StereoPannerNode | null = null;
   private hookEnvGain: GainNode | null = null;
   private hookMixGain: GainNode | null = null;
+  private hookLeadOsc: OscillatorNode | null = null;
+  private hookLeadGain: GainNode | null = null;
   private hookDelay: DelayNode | null = null;
   private hookDelayFeedback: GainNode | null = null;
   private hookDelayWet: GainNode | null = null;
@@ -182,11 +184,17 @@ export class AmbientAudio {
       hookOscB.frequency.value = 220;
       hookOscB.detune.value = 6;
 
+      const hookLeadOsc = ctx.createOscillator();
+      this.hookLeadOsc = hookLeadOsc;
+      hookLeadOsc.type = "sawtooth";
+      hookLeadOsc.frequency.value = 220;
+      hookLeadOsc.detune.value = 12;
+
       const hookFilter = ctx.createBiquadFilter();
       this.hookFilter = hookFilter;
       hookFilter.type = "lowpass";
-      hookFilter.frequency.value = 2200;
-      hookFilter.Q.value = 0.9;
+      hookFilter.frequency.value = 2400;
+      hookFilter.Q.value = 1.25;
 
       const hookPanner = ctx.createStereoPanner();
       this.hookPanner = hookPanner;
@@ -199,6 +207,10 @@ export class AmbientAudio {
       const hookMixGain = ctx.createGain();
       this.hookMixGain = hookMixGain;
       hookMixGain.gain.value = 0;
+
+      const hookLeadGain = ctx.createGain();
+      this.hookLeadGain = hookLeadGain;
+      hookLeadGain.gain.value = 0.45;
 
       const hookDelay = ctx.createDelay(0.8);
       this.hookDelay = hookDelay;
@@ -222,6 +234,8 @@ export class AmbientAudio {
 
       hookOscA.connect(hookFilter);
       hookOscB.connect(hookFilter);
+      hookLeadOsc.connect(hookLeadGain);
+      hookLeadGain.connect(hookFilter);
       hookFilter.connect(hookPanner);
       hookPanner.connect(hookEnvGain);
       hookEnvGain.connect(hookMixGain);
@@ -247,6 +261,7 @@ export class AmbientAudio {
     this.acidOsc?.start();
     this.hookOscA?.start();
     this.hookOscB?.start();
+    this.hookLeadOsc?.start();
     this.hookLfoOsc?.start();
 
     this.nextStepTime = ctx.currentTime + 0.05;
@@ -371,6 +386,11 @@ export class AmbientAudio {
     } catch {
       // ignore
     }
+    try {
+      this.hookLeadOsc?.stop();
+    } catch {
+      // ignore
+    }
     this.source?.disconnect();
     this.filter?.disconnect();
     this.compressor?.disconnect();
@@ -387,6 +407,7 @@ export class AmbientAudio {
     this.hookDelay?.disconnect();
     this.hookMixGain?.disconnect();
     this.hookEnvGain?.disconnect();
+    this.hookLeadGain?.disconnect();
     this.hookPanner?.disconnect();
     this.hookFilter?.disconnect();
     this.hookLfoGain?.disconnect();
@@ -415,6 +436,8 @@ export class AmbientAudio {
     this.hookDelayWet = null;
     this.hookLfoOsc = null;
     this.hookLfoGain = null;
+    this.hookLeadOsc = null;
+    this.hookLeadGain = null;
     this.masterGain = null;
     this.ctx = null;
   }
@@ -636,7 +659,16 @@ export class AmbientAudio {
   private scheduleHook(now: number, energy: number) {
     if (!this.ctx) return;
     if (!this.isGenerated) return;
-    if (!this.hookOscA || !this.hookOscB || !this.hookFilter || !this.hookEnvGain || !this.hookMixGain) return;
+    if (
+      !this.hookOscA ||
+      !this.hookOscB ||
+      !this.hookLeadOsc ||
+      !this.hookLeadGain ||
+      !this.hookFilter ||
+      !this.hookEnvGain ||
+      !this.hookMixGain
+    )
+      return;
     if (!this.hookDelay || !this.hookDelayWet || !this.hookDelayFeedback) return;
     if (this.phase !== "play") {
       // Keep it out of intros/outros to avoid fighting the scene.
@@ -650,7 +682,7 @@ export class AmbientAudio {
     const lookahead = 0.16;
 
     // Mix level follows energy so the hook “arrives” with the drop.
-    const mix = lerp(0.05, 0.18, Math.pow(energy, 1.1)) * (this.thrusting ? 1.12 : 1);
+    const mix = lerp(0.12, 0.42, Math.pow(energy, 1.2)) * (this.thrusting ? 1.2 : 1);
     this.hookMixGain.gain.setTargetAtTime(mix, now, 0.08);
 
     // Tempo-synced dotted 8th-ish delay.
@@ -672,19 +704,21 @@ export class AmbientAudio {
         this.hookOscB.frequency.setTargetAtTime(freq, t0, 0.006);
 
         // Filter "pluck" (kept gentle; distortion + master filter do the rest).
-        const cutBase = lerp(850, 2100, energy) + (this.thrusting ? 250 : 0);
-        const cutPeak = lerp(2600, 5600, energy) + (this.thrusting ? 550 : 0);
+        const cutBase = lerp(1100, 2500, energy) + (this.thrusting ? 320 : 0);
+        const cutPeak = lerp(3200, 6800, energy) + (this.thrusting ? 680 : 0);
         this.hookFilter.frequency.cancelScheduledValues(t0);
         this.hookFilter.frequency.setValueAtTime(cutBase, t0);
         this.hookFilter.frequency.setTargetAtTime(cutPeak, t0 + 0.008, 0.035);
-        this.hookFilter.Q.setTargetAtTime(lerp(0.85, 1.4, energy), t0, 0.08);
+        this.hookFilter.Q.setTargetAtTime(lerp(1.0, 1.7, energy), t0, 0.08);
 
         // Per-note amp envelope.
-        const amp = lerp(0.03, 0.11, energy) * (this.thrusting ? 1.15 : 1);
+        const amp = lerp(0.04, 0.15, energy) * (this.thrusting ? 1.25 : 1);
         this.hookEnvGain.gain.cancelScheduledValues(t0);
         this.hookEnvGain.gain.setValueAtTime(0.0001, t0);
         this.hookEnvGain.gain.linearRampToValueAtTime(amp, t0 + 0.008);
         this.hookEnvGain.gain.exponentialRampToValueAtTime(0.0001, t0 + step8 * 0.98);
+        const leadFreq = freq * 1.18;
+        this.hookLeadOsc?.frequency.setTargetAtTime(leadFreq, t0, 0.007);
       }
 
       this.hookStepIndex++;
@@ -708,11 +742,16 @@ const acidPatternSemitones: Array<number | null> = [
 ];
 
 const hookPatternSemitones: Array<number | null> = [
-  // 2 bars @ 8ths (relative to A3=220Hz).
-  // Darker “phrygian-ish” motif to cut through the groove without turning it bright/cheesy.
-  // Scale tones around A: 0, 1, 3, 5, 7, 8, 10
-  12, 13, 15, 13, 12, 10, 8, 10,
-  null, 12, 13, 15, 17, 15, 13, 12
+  // 4 bars @ 8ths - Schacke "In Verruf" style hypnotic dark hook
+  // A minor / phrygian - repetitive, relentless, stuck in your head
+  // Bar 1: driving motif
+  0, 0, 3, 0, 5, 3, 0, -2,
+  // Bar 2: slight variation with octave
+  0, 0, 3, 0, 12, 10, 8, 7,
+  // Bar 3: repeat tension
+  0, 0, 3, 0, 5, 3, 0, -2,
+  // Bar 4: release and drop
+  0, 3, 5, 7, 8, 7, 5, 3
 ];
 
 function lerp(a: number, b: number, t: number) {
