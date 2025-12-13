@@ -113,7 +113,7 @@ function generatePosterCanvasTexture(): CanvasTexture {
 
   const titleY = margin + 160;
   ctx.font = "700 86px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-  ctx.fillText("WINTER MYSTIC", width / 2, titleY);
+  ctx.fillText("Party Invite!", width / 2, titleY);
 
   ctx.font = "600 44px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
   ctx.fillStyle = "rgba(166,215,255,0.95)";
