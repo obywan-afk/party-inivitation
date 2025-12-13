@@ -1,5 +1,6 @@
 import {
   CanvasTexture,
+  LinearFilter,
   LinearMipmapLinearFilter,
   SRGBColorSpace,
   Texture,
@@ -22,10 +23,7 @@ export async function createPosterTexture(
   if (ENV_POSTER_URL) {
     const fromEnv = await tryLoadPosterFromPublic(ENV_POSTER_URL);
     if (fromEnv) {
-      fromEnv.colorSpace = SRGBColorSpace;
-      fromEnv.minFilter = LinearMipmapLinearFilter;
-      fromEnv.generateMipmaps = true;
-      fromEnv.anisotropy = clamp(renderer.capabilities.getMaxAnisotropy(), 2, 12);
+      configurePosterTexture(fromEnv, renderer);
       onProgress?.(0.95);
       return fromEnv;
     }
@@ -33,19 +31,13 @@ export async function createPosterTexture(
 
   const loaded = await tryLoadPosterFromPublic(POSTER_URL);
   if (loaded) {
-    loaded.colorSpace = SRGBColorSpace;
-    loaded.minFilter = LinearMipmapLinearFilter;
-    loaded.generateMipmaps = true;
-    loaded.anisotropy = clamp(renderer.capabilities.getMaxAnisotropy(), 2, 12);
+    configurePosterTexture(loaded, renderer);
     onProgress?.(0.95);
     return loaded;
   }
 
   const generated = generatePosterCanvasTexture();
-  generated.colorSpace = SRGBColorSpace;
-  generated.minFilter = LinearMipmapLinearFilter;
-  generated.generateMipmaps = true;
-  generated.anisotropy = clamp(renderer.capabilities.getMaxAnisotropy(), 2, 12);
+  configurePosterTexture(generated, renderer);
   onProgress?.(0.95);
   return generated;
 }
@@ -163,4 +155,29 @@ function generatePosterCanvasTexture(): CanvasTexture {
   const tex = new CanvasTexture(canvas);
   tex.needsUpdate = true;
   return tex;
+}
+
+function configurePosterTexture(texture: Texture, renderer: WebGLRenderer) {
+  texture.colorSpace = SRGBColorSpace;
+  const canUseMipmaps =
+    renderer.capabilities.isWebGL2 || isImagePowerOfTwo(texture.image);
+  texture.minFilter = canUseMipmaps ? LinearMipmapLinearFilter : LinearFilter;
+  texture.generateMipmaps = canUseMipmaps;
+  texture.anisotropy = clamp(renderer.capabilities.getMaxAnisotropy(), 2, 12);
+}
+
+function isImagePowerOfTwo(image: Texture["image"]): boolean {
+  const width = getImageDimension(image, "width");
+  const height = getImageDimension(image, "height");
+  return isPowerOfTwo(width) && isPowerOfTwo(height);
+}
+
+function getImageDimension(image: Texture["image"], prop: "width" | "height"): number | undefined {
+  if (!image) return undefined;
+  const value = (image as Record<string, unknown>)[prop];
+  return typeof value === "number" ? value : undefined;
+}
+
+function isPowerOfTwo(value: number | undefined): boolean {
+  return typeof value === "number" && value > 0 && (value & (value - 1)) === 0;
 }
